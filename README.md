@@ -4,6 +4,7 @@ Reverse-engineering focused MCP server for PC WeChat WMPF runtimes and `.wxapkg`
 
 Project tracking:
 
+- [Original `/plan` session output](docs/original-plan.md)
 - [Implementation plan](docs/plan.md)
 - [Progress and acceptance status](docs/progress.md)
 - [MCP tool API](docs/api.md)
