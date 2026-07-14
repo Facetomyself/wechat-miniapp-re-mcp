@@ -78,9 +78,9 @@ Environment observed:
 
 ## Known limitations and next actions
 
-1. Restart WeChat + open mini-program first, then attach MCP to avoid bridge teardown; verify evaluate/breakpoint/Network/trace/replay end-to-end.
-2. Find a mini-game wxapkg for the last remaining Phase 3 fixture type.
-3. Validate a second WMPF version profile (e.g. `19841`) with live runtime — `addresses.19841.json` exists.
+1. Phase 2: WMPF CDP bridge requires mini-program in foreground at attach time. See [`lessons-learned.md`](lessons-learned.md) for root cause analysis and recommended workflow.
+2. Phase 3: Find a mini-game wxapkg for the last remaining fixture type.
+3. Phase 4: Validate a second WMPF version profile (e.g. `19841`) with live runtime — `addresses.19841.json` exists.
 
 ## Update rule
 

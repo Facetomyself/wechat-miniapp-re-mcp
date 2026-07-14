@@ -8,6 +8,7 @@ Project tracking:
 - [Implementation plan](docs/plan.md)
 - [Progress and acceptance status](docs/progress.md)
 - [MCP tool API](docs/api.md)
+- [Lessons learned & known behaviors](docs/lessons-learned.md)
 
 ## Design
 
