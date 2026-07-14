@@ -1,0 +1,72 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import net from 'node:net';
+import { WebSocket } from 'ws';
+import { WmpfBridgeServer } from '../src/transport/bridge-server.js';
+import { decodeCdpPayload, decodeEnvelope, encodeCdpResultEnvelope } from '../src/transport/codec.js';
+
+test('bridge assigns a pending session and routes CDP in both directions', async () => {
+  const port = await freePort();
+  const received: Array<{ payload: string; contextId: string }> = [];
+  const connected: string[] = [];
+  const bridge = new WmpfBridgeServer('127.0.0.1', port, {
+    onCdp: (sessionId, payload, contextId) => {
+      assert.equal(sessionId, 'session-1');
+      received.push({ payload, contextId });
+    },
+    onContext: () => undefined,
+    onEnvelope: () => undefined,
+    onConnected: (sessionId) => connected.push(sessionId),
+    onDisconnected: () => undefined,
+  });
+  await bridge.start();
+  bridge.prepare('session-1');
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', () => resolve());
+    socket.once('error', reject);
+  });
+  assert.equal(await bridge.waitForConnection('session-1', 500), true);
+  assert.deepEqual(connected, ['session-1']);
+
+  const outbound = new Promise<{ payload: string; contextId: string }>((resolve, reject) => {
+    socket.once('message', (data) => {
+      try {
+        const envelope = decodeEnvelope(Buffer.from(data as Buffer));
+        const cdp = decodeCdpPayload(envelope.data);
+        resolve({ payload: cdp.payload, contextId: cdp.jscontextId });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+  await bridge.sendCdp('session-1', '{"id":1,"method":"Runtime.enable"}', 'ctx-a');
+  assert.deepEqual(await outbound, { payload: '{"id":1,"method":"Runtime.enable"}', contextId: 'ctx-a' });
+
+  socket.send(encodeCdpResultEnvelope(2, '{"id":1,"result":{}}', 'ctx-a'));
+  await waitUntil(() => received.length === 1);
+  assert.deepEqual(received, [{ payload: '{"id":1,"result":{}}', contextId: 'ctx-a' }]);
+
+  socket.close();
+  await bridge.stop();
+});
+
+async function freePort(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Unable to reserve a test port');
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return address.port;
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('Timed out waiting for condition');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

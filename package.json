@@ -1,0 +1,35 @@
+{
+  "name": "wechat-miniapp-re-mcp",
+  "version": "0.1.0",
+  "description": "Reverse-engineering focused MCP server for PC WeChat WMPF and wxapkg targets",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "build/src/index.js",
+  "bin": {
+    "wechat-miniapp-re-mcp": "build/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test build/test",
+    "smoke": "node scripts/smoke-list-tools.mjs",
+    "contract": "node scripts/check-contract.mjs",
+    "check": "npm run typecheck && npm run test && npm run contract && npm run smoke",
+    "start": "node build/src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "frida": "^17.15.5",
+    "protobufjs": "^8.7.1",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
