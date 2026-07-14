@@ -39,6 +39,14 @@ build/Release
 
 # Dependency directories
 node_modules/
+build/
+.wxmp-workspace/
+coverage/
+profiles/local/
+*.wxapkg
+*.pcap
+*.har
+*.flow
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)
