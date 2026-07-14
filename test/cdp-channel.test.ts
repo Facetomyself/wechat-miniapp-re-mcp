@@ -141,3 +141,51 @@ test('CDP channel onRaw forwards events to listeners', async () => {
 
   await fs.rm(root, { recursive: true, force: true });
 });
+
+test('CDP channel tracks execution context creation and destruction', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
+  const evidence = new EvidenceStore(root, 'fixture', 'session-1');
+  await evidence.init();
+  const channel = new CdpChannel('session-1', evidence, async () => {});
+
+  const added: Array<{ id: string; name?: string; kind?: string }> = [];
+  channel.onContext((action, ctx) => {
+    if (action === 'add') added.push(ctx);
+  });
+
+  channel.handlePayload(JSON.stringify({
+    method: 'Runtime.executionContextCreated',
+    params: { context: { id: '1', name: 'AppContext', origin: 'https://servicewechat.com' } },
+  }), 'ctx-1');
+  assert.equal(added.length, 1);
+  assert.equal(added[0].id, '1');
+  assert.equal(added[0].name, 'AppContext');
+  assert.equal(added[0].kind, 'miniapp');
+  assert.equal(channel.contexts.size, 1);
+
+  channel.handlePayload(JSON.stringify({
+    method: 'Runtime.executionContextDestroyed',
+    params: { executionContextId: 1 },
+  }), 'ctx-1');
+  assert.equal(channel.contexts.size, 0);
+
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('CDP channel detects minigame context kind', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
+  const evidence = new EvidenceStore(root, 'fixture', 'session-1');
+  await evidence.init();
+  const channel = new CdpChannel('session-1', evidence, async () => {});
+
+  const kinds: string[] = [];
+  channel.onContext((_action, ctx) => { kinds.push(ctx.kind ?? ''); });
+
+  channel.handlePayload(JSON.stringify({
+    method: 'Runtime.executionContextCreated',
+    params: { context: { id: '2', name: 'GameContext', origin: 'https://servicewechat.com' } },
+  }), 'ctx-1');
+  assert.equal(kinds[0], 'minigame');
+
+  await fs.rm(root, { recursive: true, force: true });
+});

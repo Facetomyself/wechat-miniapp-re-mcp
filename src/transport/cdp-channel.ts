@@ -1,5 +1,5 @@
 import { EvidenceStore } from '../evidence/store.js';
-import { NetworkRecord, ScriptRecord } from '../types.js';
+import { NetworkRecord, ScriptRecord, WmpfContext } from '../types.js';
 import { WxmpError } from '../errors.js';
 
 interface PendingCommand {
@@ -9,13 +9,16 @@ interface PendingCommand {
 }
 
 type RawListener = (payload: string) => void;
+type ContextListener = (action: 'add' | 'remove', context: { id: string; name?: string; origin?: string; kind?: string }) => void;
 
 export class CdpChannel {
   private commandId = 1000;
   private pending = new Map<number, PendingCommand>();
   private rawListeners = new Set<RawListener>();
+  private contextListeners = new Set<ContextListener>();
   readonly scripts = new Map<string, ScriptRecord>();
   readonly requests = new Map<string, NetworkRecord>();
+  readonly contexts = new Map<string, WmpfContext>();
   lastPaused: Record<string, unknown> | null = null;
   traceActive = false;
 
@@ -114,6 +117,36 @@ export class CdpChannel {
           headers: normalizeHeaders(response.headers),
         };
       }
+    } else if (method === 'Runtime.executionContextCreated') {
+      const context = (params.context ?? {}) as Record<string, unknown>;
+      const id = String(context.id ?? '');
+      if (id) {
+        const name = String(context.name ?? '');
+        const origin = String(context.origin ?? '');
+        const lowerName = name.toLowerCase();
+        const kind = lowerName.includes('game') ? 'minigame' as const
+          : lowerName.includes('app') || lowerName.includes('service') || origin.includes('servicewechat') ? 'miniapp' as const
+          : 'unknown' as const;
+        const ctx: WmpfContext = {
+          id,
+          name,
+          kind,
+          connectedAt: new Date().toISOString(),
+          capabilities: kind === 'minigame' ? ['evaluate', 'network', 'capability-probe'] : ['evaluate', 'debugger', 'network', 'wx-trace'],
+        };
+        this.contexts.set(id, ctx);
+        for (const listener of this.contextListeners) {
+          listener('add', { id, name, origin, kind });
+        }
+      }
+    } else if (method === 'Runtime.executionContextDestroyed') {
+      const id = String(params.executionContextId ?? '');
+      if (id) {
+        this.contexts.delete(id);
+        for (const listener of this.contextListeners) {
+          listener('remove', { id });
+        }
+      }
     } else if (method === 'Runtime.consoleAPICalled') {
       const args = Array.isArray(params.args) ? (params.args as Array<Record<string, unknown>>) : [];
       for (const arg of args) {
@@ -135,6 +168,11 @@ export class CdpChannel {
     return () => this.rawListeners.delete(listener);
   }
 
+  onContext(listener: ContextListener): () => void {
+    this.contextListeners.add(listener);
+    return () => this.contextListeners.delete(listener);
+  }
+
   close(reason = 'session closed'): void {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
@@ -142,6 +180,7 @@ export class CdpChannel {
     }
     this.pending.clear();
     this.rawListeners.clear();
+    this.contextListeners.clear();
   }
 }
 

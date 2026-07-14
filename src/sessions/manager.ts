@@ -74,6 +74,7 @@ export class SessionManager {
     if (!probe.valid) throw new WxmpError('PROFILE_OUT_OF_BOUNDS', 'Profile offsets are outside the target module', probe);
 
     const channel = new CdpChannel(id, evidence, (payload, contextId) => this.bridge.sendCdp(id, payload, contextId));
+    const cdpContextUnsub = channel.onContext((action, value) => this.handleCdpContext(id, action, value));
     const now = new Date().toISOString();
     const session: WxmpSession = {
       id,
@@ -245,6 +246,29 @@ export class SessionManager {
     this.updateState(session, 'disconnected');
     session.channel.close('WMPF runtime disconnected');
     void session.evidence.append('runtime.disconnected', {});
+  }
+
+  private handleCdpContext(sessionId: string, action: 'add' | 'remove', value: { id: string; name?: string; origin?: string; kind?: string }): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || !value.id) return;
+    if (action === 'remove') {
+      session.contexts.delete(value.id);
+      if (session.selectedContextId === value.id) session.selectedContextId = '';
+      void session.evidence.append('context.removed', value, { contextId: value.id });
+      return;
+    }
+    const name = value.name ?? '';
+    const context: WmpfContext = {
+      id: value.id,
+      name,
+      kind: (value.kind as WmpfContext['kind']) ?? (name.toLowerCase().includes('game') ? 'minigame' : name.toLowerCase().includes('app') || name.toLowerCase().includes('service') ? 'miniapp' : 'unknown'),
+      connectedAt: new Date().toISOString(),
+      capabilities: name.toLowerCase().includes('game') ? ['evaluate', 'network', 'capability-probe'] : ['evaluate', 'debugger', 'network', 'wx-trace'],
+    };
+    session.contexts.set(value.id, context);
+    if (!session.selectedContextId) session.selectedContextId = value.id;
+    if (context.kind === 'minigame') session.capabilities.minigameDynamic = 'partial';
+    void session.evidence.append('context.added', context, { contextId: value.id });
   }
 
   private handleContext(sessionId: string, action: 'add' | 'remove', value: { id: string; name?: string }): void {
