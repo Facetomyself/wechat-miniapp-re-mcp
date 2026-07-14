@@ -7,7 +7,14 @@ Current branches:
 - Child: `feat/bootstrap-re-mcp`
 - Parent: `feat/wechat-miniapp-re-mcp-integration`
 
-Current overall completion: approximately 70%. This number reflects acceptance gates, not file count.
+Current overall completion: approximately 75%. This number reflects acceptance gates, not file count.
+
+Git delivery tracking:
+
+- Child implementation commit: `f592d3a119218e5ad925bd7794d2ce9ea84d7277`.
+- Child PR: [Facetomyself/wechat-miniapp-re-mcp#1](https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/1).
+- Child PR state: open, mergeable, CI `test` passed on 2026-07-14.
+- Parent integration PR: pending child merge and final parent gitlink update.
 
 ## Phase status
 
@@ -19,7 +26,7 @@ Current overall completion: approximately 70%. This number reflects acceptance g
 | 3. Static reverse workflow | In progress | 85% | Gwxapkg `v2.7.4` pinned as parent submodule; reproducible parent build wrapper passed; ignored runtime metadata contains source commit/SHA-256; generated plaintext fixture decompiled to `app.js`/`app.json`; adapter detects empty-output false success | Encrypted/subpackage/plugin/mini-game fixtures and index/repack gates |
 | 4. Profile lifecycle | In progress | 55% | Profile schema, legacy runtime conversion, module SHA-256 and bounds probe, wildcard AOB candidate generation | Clean-room signature database, disassembly evidence, second WMPF version and runtime candidate validation |
 | 5. Parent integration | In progress | 75% | Gwxapkg wrapper/runtime ignore, on-demand Codex config, MCP/tool docs, reverse-coordinator route and workspace audit completed | Decide `.mcp.json` activation after real CDP gate; final parent diff review and PR |
-| 6. Git delivery | Pending | 0% | Remote child repository exists and is Private | Child commit/push/PR, reviewed child commit, parent gitlink update/push/PR |
+| 6. Git delivery | In progress | 50% | Child commit `f592d3a` pushed; Private PR [#1](https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/1) is open, mergeable, and CI passed | Merge child PR, update parent gitlink to the merged commit, then push and open the parent PR |
 
 ## Current automated verification
 
@@ -55,7 +62,7 @@ The current implementation therefore proves target discovery and hook injection,
 2. Exercise evaluate, script source, breakpoint/stack, Network capture/body, trace, request replay, wx API, and cloud calls against that live context.
 3. Add static fixtures for encrypted packages, subpackages, plugins, and mini games.
 4. Add a clean-room signature set and validate a second WMPF version.
-5. Complete final parent diff review, then deliver child and parent PRs in that order.
+5. Merge child PR #1, update the parent gitlink to the reviewed commit, complete the final parent diff review, and open the parent integration PR.
 
 ## Update rule
 
