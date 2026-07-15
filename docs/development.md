@@ -22,3 +22,4 @@ git status --short --branch
 ```
 
 CI runs the same gate on Node.js 20 and 22. A PR is not delivery-complete while either matrix job is red or absent.
+The test command uses `scripts/run-tests.mjs` to enumerate compiled test files explicitly; passing the `build/test` directory directly is not portable across Node 20/22 on Windows.
