@@ -1,39 +1,72 @@
 {
   "schemaVersion": 2,
-  "description": "Clean-room AOB signature database for WMPF flue.dll hook points. Each entry captures byte patterns around known-good function entry points, usable for cross-version offset discovery via pattern matching.",
-  "source": "Clean-room extracted from the locally observed WMPF v19977 flue.dll at runtime-verified hook offsets.",
+  "description": "Clean-room AOB signature database for WMPF flue.dll hook points. Each entry captures a cross-version byte pattern around a reviewed function entry point.",
+  "source": "Clean-room extracted and uniquely matched against reviewed official WMPF v19977 and v20079 flue.dll modules.",
   "generatedAt": "2026-07-15",
   "verification": {
-    "wmpfVersion": 19977,
-    "moduleName": "flue.dll",
-    "moduleSize": 210861096,
-    "moduleSha256": "f569e0ddcd622e85fb33a0e2a4c647561fd27440c9612a54140572a42c8cfc7d",
-    "cdpFilterUniqueMatch": 1,
-    "loadStartUniqueMatch": 1,
-    "matchDelta": -32,
-    "status": "clean-room-verified",
-    "reviewedProfile": "data/profiles/clean-room/windows-19977.json",
+    "verifiedVersions": [
+      19977,
+      20079
+    ],
+    "status": "clean-room-cross-version-verified",
     "confidence": "high",
     "verifiedAt": "2026-07-15",
-    "runtimeVerification": "Transport, context discovery, evaluate, Network events, evidence export, and disconnect/reconnect were observed on WMPF v19977. Breakpoint binding, wx trace, hook capture, and replay remain explicit semantic gates."
+    "crossVersionUniqueMatches": {
+      "cdpFilter": true,
+      "loadStart": true
+    },
+    "runtimeVerification": "WMPF v19977 passed the full live semantic gate. WMPF v20079 passed profile generation, SHA-256 binding, offset bounds, production hook attachment, ready, and explicit detach; its mini-program semantic gate remains pending."
   },
   "signatures": {
     "cdpFilter": {
-      "description": "SendToClientFilter — CDP filter function. Single unique AOB match confirmed in v19977 flue.dll. Hook attaches onLeave, reads input pointer+8, patches value 6→0.",
-      "verifiedVersions": [19977],
-      "aobPre": "85 C9 79 05 4B 8B 44 25 08 4C 8B 6C 24 30 48 85",
-      "aobPost": "38 E9 5E FF FF FF 31 FF EB 5C 4C 8B 7E 08 48 8B",
+      "description": "SendToClientFilter — CDP filter function. The pattern matched exactly once in reviewed v19977 and v20079 flue.dll modules. Hook attaches onLeave, reads input pointer+8, and patches value 6→0.",
+      "verifiedVersions": [
+        19977,
+        20079
+      ],
+      "pattern": "85 C9 79 05 4B 8B 44 25 08 4C 8B 6C 24 30 48 85",
       "searchWindow": 64,
       "adjustment": 32
     },
     "loadStart": {
-      "description": "AppletIndexContainer::OnLoadStart — mini-program load entry. Single unique AOB match confirmed in v19977 flue.dll. Hook attaches onEnter, reads rcx→scene chain, patches scene to 1101.",
-      "verifiedVersions": [19977],
-      "aobPre": "64 08 41 B8 01 00 00 00 48 89 C1 E8 90 40 D4 01",
-      "aobPost": "89 D9 E8 69 8E C8 FF 48 8B 13 4C 8B 43 08 48 89",
+      "description": "AppletIndexContainer::OnLoadStart — mini-program load entry. The wildcarded call displacement keeps one unique entry-point match in reviewed v19977 and v20079 flue.dll modules. Hook attaches onEnter, reads the rcx→scene chain, and patches whitelisted scenes to 1101.",
+      "verifiedVersions": [
+        19977,
+        20079
+      ],
+      "pattern": "89 02 48 C7 42 08 66 00 00 00 48 8D 5C 24 30 48 89 D9 E8 ?? ?? ?? FF 48 8B 13 4C 8B 43 08 48 89",
       "searchWindow": 64,
-      "adjustment": 32
+      "adjustment": 0
     }
   },
-  "versionProfiles": []
+  "versionProfiles": [
+    {
+      "wmpfVersion": 19977,
+      "moduleName": "flue.dll",
+      "moduleSize": 210861096,
+      "moduleSha256": "f569e0ddcd622e85fb33a0e2a4c647561fd27440c9612a54140572a42c8cfc7d",
+      "cdpFilterOffset": "0x30B02B0",
+      "loadStartOffset": "0x25D14B0",
+      "uniqueMatches": {
+        "cdpFilter": 1,
+        "loadStart": 1
+      },
+      "reviewedProfile": "data/profiles/clean-room/windows-19977.json",
+      "runtimeVerification": "Full live semantic gate: AppService selection, evaluate, bound breakpoint, trace and request hooks, Network body, replay, reconnect, detach, and evidence export."
+    },
+    {
+      "wmpfVersion": 20079,
+      "moduleName": "flue.dll",
+      "moduleSize": 210993712,
+      "moduleSha256": "b28ec2d547e8771aeebe94ba77bc618941c0ce0794ef443f905666f0668f5d2b",
+      "cdpFilterOffset": "0x30CF310",
+      "loadStartOffset": "0x25DFB90",
+      "uniqueMatches": {
+        "cdpFilter": 1,
+        "loadStart": 1
+      },
+      "reviewedProfile": "data/profiles/clean-room/windows-20079.json",
+      "runtimeVerification": "Profile generation, SHA-256 binding, offset bounds, production FridaRuntimeAdapter hook attachment, ready, and explicit detach. Mini-program semantic gates were not run."
+    }
+  ]
 }

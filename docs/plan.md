@@ -6,7 +6,7 @@ Deliver a lightweight, reverse-engineering focused MCP server for PC WeChat WMPF
 
 ## Locked decisions
 
-- Repository: `Facetomyself/wechat-miniapp-re-mcp`, Private during initial development.
+- Repository: `Facetomyself/wechat-miniapp-re-mcp`, public after the pre-release working-tree/history/Actions audit; npm publication remains disabled.
 - Parent mount: `D:\reverse_ENV\mcp\wechat-miniapp-re-mcp` as a Git submodule.
 - Runtime: TypeScript, project Node.js, `@modelcontextprotocol/sdk`.
 - MCP prefix: `wxmp_*`.
@@ -21,12 +21,12 @@ Deliver a lightweight, reverse-engineering focused MCP server for PC WeChat WMPF
 
 ### Phase 0: Repository and governance
 
-- Create the Private child repository and feature branch.
+- Create the child repository privately, complete the sensitive-data audit, then publish it and continue feature work through pull requests.
 - Mount it below the parent `mcp/` directory.
 - Add repository-level `AGENTS.md`, development rules, MIT license, and Git exclusions.
 - Update parent governance before implementation code.
 
-Acceptance: both repositories have isolated branches, the child remote is Private, and the parent references a remotely obtainable child commit.
+Acceptance: both repositories have isolated branches, the audited child remote is public, and the parent references a remotely obtainable child commit.
 
 ### Phase 1: Lightweight MCP core
 

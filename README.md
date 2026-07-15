@@ -22,7 +22,7 @@ Project tracking:
 - dynamic inspection, breakpoints, context-scoped network capture, `wx.*` tracing, request hooks, replay, and evidence export; unscoped WMPF events fall back to the selected context
 - pluggable static backends, with Gwxapkg as the default adapter
 - hash-bound generated profile candidates with explicit review-evidence promotion before injection
-- bundled v19977 clean-room profile and AOB signature database, discovered automatically from the package
+- bundled v19977/v20079 clean-room profiles and a cross-version AOB signature database, discovered automatically from the package
 - clean-room protocol implementation; legacy First profiles can be consumed from an external local directory but are not copied into this repository
 
 ## Development
@@ -52,4 +52,4 @@ Useful environment variables:
 - `WXMP_MAX_EVIDENCE_EVENTS`: maximum persisted events per session before overflow is recorded, defaults to `100000`
 - `WXMP_MAX_EVIDENCE_BYTES`: maximum persisted NDJSON bytes per session, defaults to `268435456` (256 MiB); oversized individual events are stored as bounded previews
 
-The repository is private during initial development. Do not commit wxapkg files, extracted source trees, credentials, captures, third-party profiles, WMPF binaries, or generated evidence.
+The GitHub repository is public. The package keeps `"private": true` only to block accidental npm publication. Do not commit wxapkg files, extracted source trees, credentials, captures, third-party profiles, WMPF binaries, or generated evidence.
