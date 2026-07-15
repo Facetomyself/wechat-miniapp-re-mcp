@@ -8,7 +8,7 @@ interface PendingCommand {
   timer: NodeJS.Timeout;
 }
 
-type RawListener = (payload: string) => void;
+type RawListener = (payload: string, contextId: string) => void;
 type ContextListener = (action: 'add' | 'remove', context: { id: string; name?: string; origin?: string; kind?: string }) => void;
 
 export class CdpChannel {
@@ -34,17 +34,27 @@ export class CdpChannel {
   }
 
   async sendObject(command: Record<string, unknown>, contextId = '', timeoutMs = 10_000): Promise<Record<string, unknown>> {
-    const id = Number(command.id ?? ++this.commandId);
+    const suppliedId = command.id;
+    const id = suppliedId === undefined ? ++this.commandId : Number(suppliedId);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new WxmpError('INVALID_CDP_ID', 'CDP command id must be a positive safe integer', { id: suppliedId });
+    }
+    if (this.pending.has(id)) {
+      throw new WxmpError('CDP_ID_COLLISION', `CDP command id ${id} is already pending`, { id });
+    }
+    this.commandId = Math.max(this.commandId, id);
     command.id = id;
     const payload = JSON.stringify(command);
-    await this.evidence.append('cdp.command', { id, method: command.method, params: command.params }, { contextId, operation: String(command.method ?? 'raw') });
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new WxmpError('CDP_TIMEOUT', `CDP command ${String(command.method ?? id)} timed out`, { id, timeoutMs }));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      void this.sendPayload(payload, contextId).catch((error) => {
+      void (async () => {
+        await this.evidence.append('cdp.command', { id, method: command.method, params: command.params }, { contextId, operation: String(command.method ?? 'raw') });
+        await this.sendPayload(payload, contextId);
+      })().catch((error) => {
         clearTimeout(timer);
         this.pending.delete(id);
         reject(error instanceof Error ? error : new Error(String(error)));
@@ -53,7 +63,7 @@ export class CdpChannel {
   }
 
   handlePayload(payload: string, contextId: string): void {
-    for (const listener of this.rawListeners) listener(payload);
+    for (const listener of this.rawListeners) listener(payload, contextId);
     let message: Record<string, unknown>;
     try {
       message = JSON.parse(payload) as Record<string, unknown>;
@@ -80,6 +90,7 @@ export class CdpChannel {
     if (method === 'Debugger.scriptParsed') {
       const script: ScriptRecord = {
         scriptId: String(params.scriptId ?? ''),
+        contextId,
         url: String(params.url ?? ''),
         executionContextId: params.executionContextId === undefined ? undefined : Number(params.executionContextId),
         hash: params.hash === undefined ? undefined : String(params.hash),
@@ -97,6 +108,7 @@ export class CdpChannel {
       if (requestId) {
         this.requests.set(requestId, {
           requestId,
+          contextId,
           url: String(request.url ?? ''),
           method: String(request.method ?? 'GET'),
           requestHeaders: normalizeHeaders(request.headers),
@@ -131,8 +143,11 @@ export class CdpChannel {
           id,
           name,
           kind,
+          role: kind === 'minigame' ? 'minigame' : 'unknown',
+          origin,
+          probeConfidence: 'unprobed',
           connectedAt: new Date().toISOString(),
-          capabilities: kind === 'minigame' ? ['evaluate', 'network', 'capability-probe'] : ['evaluate', 'debugger', 'network', 'wx-trace'],
+          capabilities: ['evaluate', 'capability-probe'],
         };
         this.contexts.set(id, ctx);
         for (const listener of this.contextListeners) {
@@ -194,6 +209,17 @@ export class CdpChannel {
     this.rawListeners.clear();
     this.contextListeners.clear();
   }
+}
+
+export function extractRemoteValue(response: Record<string, unknown>): unknown {
+  const result = response.result;
+  if (!result || typeof result !== 'object') return undefined;
+  const remote = (result as Record<string, unknown>).result;
+  if (!remote || typeof remote !== 'object') return undefined;
+  const record = remote as Record<string, unknown>;
+  if ('value' in record) return record.value;
+  if ('unserializableValue' in record) return record.unserializableValue;
+  return undefined;
 }
 
 function normalizeHeaders(value: unknown): Record<string, string> {

@@ -12,6 +12,10 @@ test('loadConfig resolves workspace root and debug port', () => {
   assert.ok(config.debugPort > 0 && config.debugPort < 65536);
   assert.equal(typeof config.eventLimit, 'number');
   assert.ok(config.eventLimit >= 100);
+  assert.ok(config.profileDirs.some((candidate) => candidate.endsWith(path.join('data', 'profiles', 'clean-room'))));
+  assert.ok(config.signatureDbPaths.some((candidate) => candidate.endsWith(path.join('data', 'profiles', 'aob-signatures.json'))));
+  assert.ok(config.maxEvidenceEvents >= 1000);
+  assert.ok(config.maxEvidenceBytes >= 1024 * 1024);
 });
 
 test('loadConfig respects WXMP_DEBUG_PORT env', () => {

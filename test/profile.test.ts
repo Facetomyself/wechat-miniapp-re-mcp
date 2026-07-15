@@ -14,6 +14,51 @@ test('AOB signatures support wildcards', () => {
 
 test('AOB signatures reject malformed bytes', () => {
   assert.throws(() => findPattern(Buffer.from([1, 2]), 'GG'), /Invalid byte signature/);
+  assert.throws(() => findPattern(Buffer.from([1, 2]), '1G'), /Invalid byte signature/);
+});
+
+test('profile loader rejects offset strings with trailing garbage', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-profile-'));
+  await fs.writeFile(path.join(root, 'windows-19977.json'), JSON.stringify({
+    schemaVersion: 1,
+    platform: 'windows',
+    wmpfVersion: 19977,
+    moduleName: 'flue.dll',
+    moduleSha256: '0'.repeat(64),
+    cdpFilterOffset: '0x10garbage',
+    loadStartOffset: '25junk',
+    sceneOffsets: [0x10, 0x20],
+    sceneWhitelist: [1005],
+    provenance: { source: 'clean-room', confidence: 'high' },
+  }));
+  const manager = new ProfileManager([root], []);
+  await assert.rejects(manager.load(19977), (error: unknown) => error instanceof Error && error.message.includes('Invalid offset'));
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('profile manager loads verified signatures from the configured database', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-profile-'));
+  const databasePath = path.join(root, 'signatures.json');
+  await fs.writeFile(databasePath, JSON.stringify({
+    schemaVersion: 2,
+    signatures: {
+      cdpFilter: { verifiedVersions: [19977], aobPre: 'AA BB CC', adjustment: 3 },
+      loadStart: { verifiedVersions: [19977], pattern: '11 22 33', adjustment: 0 },
+    },
+  }));
+  const manager = new ProfileManager([], [], [databasePath]);
+  assert.deepEqual(await manager.signaturesForVersion(19977), [
+    { name: 'cdpFilter', pattern: 'AA BB CC', adjustment: 3 },
+    { name: 'loadStart', pattern: '11 22 33', adjustment: 0 },
+  ]);
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('bundled reviewed profile uses the canonical filename expected by the loader', async () => {
+  const profileDir = path.resolve('data', 'profiles', 'clean-room');
+  const loaded = await new ProfileManager([profileDir], []).load(19977);
+  assert.equal(loaded.profile.provenance.confidence, 'high');
+  assert.equal(path.basename(loaded.path), 'windows-19977.json');
 });
 
 test('generated profiles bind candidates to the module SHA-256', async () => {
@@ -121,6 +166,15 @@ test('profile loader rejects a profile for a different WMPF version', async () =
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test('profile loader does not silently fall back when an explicit path is missing', async () => {
+  const profileDir = path.resolve('data', 'profiles', 'clean-room');
+  const manager = new ProfileManager([profileDir], []);
+  await assert.rejects(
+    manager.load(19977, path.join(profileDir, 'missing-profile.json')),
+    (error: unknown) => error instanceof Error && error.message.includes('Explicit profile path does not exist'),
+  );
+});
+
 test('generated profiles cannot bypass review by editing confidence', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-profile-'));
   const profilePath = path.join(root, 'windows-19977.json');
@@ -170,6 +224,23 @@ test('candidate promotion records review evidence and becomes injectable', () =>
   assert.doesNotThrow(() => manager.assertInjectable(promoted));
 });
 
+test('unreviewed clean-room profiles are probeable but not injectable', () => {
+  const manager = new ProfileManager([], []);
+  const profile: OffsetProfile = {
+    schemaVersion: 1,
+    platform: 'windows',
+    wmpfVersion: 19977,
+    moduleName: 'flue.dll',
+    moduleSha256: 'a'.repeat(64),
+    cdpFilterOffset: '0x10',
+    loadStartOffset: '0x20',
+    sceneOffsets: [0x10, 0x20],
+    sceneWhitelist: [1005],
+    provenance: { source: 'clean-room', confidence: 'high' },
+  };
+  assert.throws(() => manager.assertInjectable(profile), /require recorded review evidence/);
+});
+
 test('profile generation rejects incomplete or adjusted out-of-bounds signatures', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-profile-'));
   const executablePath = path.join(root, 'WeChatAppEx.exe');
@@ -186,6 +257,13 @@ test('profile generation rejects incomplete or adjusted out-of-bounds signatures
       { name: 'loadStart', pattern: '11 22 33' },
     ], [0x10, 0x20]),
     (error: unknown) => error instanceof Error && error.message.includes('outside the target module'),
+  );
+  await assert.rejects(
+    manager.generate(target(executablePath), [
+      { name: 'cdpFilter', pattern: 'AA BB CC', adjustment: 0.5 },
+      { name: 'loadStart', pattern: '11 22 33' },
+    ], [0x10, 0x20]),
+    (error: unknown) => error instanceof Error && error.message.includes('safe integer'),
   );
   await fs.rm(root, { recursive: true, force: true });
 });

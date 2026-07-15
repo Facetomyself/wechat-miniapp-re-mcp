@@ -41,7 +41,7 @@ For reliable MCP attach:
 - Consider a `wxmp_force_debug` tool that actively triggers the filter via direct function call after Frida injection
 - Profile the filter call frequency across different WMPF versions
 
-### Implemented Recovery Behavior in v0.2.0
+### Implemented Recovery Behavior in v0.2.0+
 
 - An unexpected WMPF socket close keeps the MCP session and Frida attachment alive.
 - The bridge requeues the same session as the only eligible runtime owner.
@@ -67,4 +67,13 @@ Mini-game JS contexts are embedded within `preload-*` renderer processes and do 
 
 ## Clean-room vs Legacy Profiles
 
-Our MCP uses a clean-room profile schema (schemaVersion: 1) but loads legacy First-format profiles (`addresses.{version}.json`) at runtime via `ProfileManager.legacyToProfile()`. The legacy profiles are read from disk but never copied into the repository — the `provenance.source` field is set to `"external-legacy"`.
+The bundled v19977 clean-room profile is loaded before external compatibility directories and is bound to the reviewed `flue.dll` SHA-256. Legacy First-format profiles (`addresses.{version}.json`) remain runtime-only fallback inputs through `WXMP_LEGACY_PROFILE_DIR`; they are not copied into this repository and are reported as hash-unbound findings.
+
+## Capability Semantics in v0.3.0
+
+- `bridgeConnected` proves transport only.
+- `debugger` and `network` become true after their CDP enable commands return successfully.
+- `wxTrace` requires a selected context with at least one wrapped `wx.*` method.
+- request-hook capability is tracked per context and requires an installed `wx.request`, `fetch`, or `XMLHttpRequest` wrapper.
+- breakpoint-by-URL with no locations is reported as pending.
+- runtime evaluation exception details are returned as structured tool errors instead of MCP success.

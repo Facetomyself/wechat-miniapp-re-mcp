@@ -31,6 +31,7 @@ export class StaticAdapter {
   }
 
   async scan(roots?: string[], limit = 1000): Promise<PackageRecord[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new WxmpError('INVALID_ARGUMENT', 'Package scan limit must be a positive integer');
     const output: PackageRecord[] = [];
     for (const root of roots?.length ? roots : defaultPackageRoots()) {
       if (!existsSync(root)) continue;
@@ -59,6 +60,8 @@ export class StaticAdapter {
   }): Promise<Record<string, unknown>> {
     const executable = this.requireBackend();
     rejectReservedArgs(options.extraArgs ?? [], ['-in', '-out', '-id']);
+    const resolvedInput = path.resolve(options.inputPath);
+    if (!existsSync(resolvedInput)) throw new WxmpError('STATIC_INPUT_NOT_FOUND', `Static input path does not exist: ${resolvedInput}`);
     const project = safeProjectName(options.projectName);
     const outputRoot = resolveInside(this.config.workspaceRoot, project, 'wechat-miniapp', 'static');
     const outputPath = resolveInside(outputRoot, options.outputName ?? `decompile-${Date.now()}`);
@@ -66,7 +69,7 @@ export class StaticAdapter {
     const appId = options.appId ?? extractAppId(options.inputPath);
     const args = [
       ...(appId ? [`-id=${appId}`] : []),
-      `-in=${path.resolve(options.inputPath)}`,
+      `-in=${resolvedInput}`,
       `-out=${outputPath}`,
       ...(options.extraArgs ?? []),
     ];
@@ -74,7 +77,7 @@ export class StaticAdapter {
     const generated = await fs.readdir(outputPath).catch(() => []);
     if (generated.length === 0) {
       throw new WxmpError('STATIC_ADAPTER_NO_OUTPUT', 'Gwxapkg exited without producing files', {
-        inputPath: path.resolve(options.inputPath),
+        inputPath: resolvedInput,
         outputPath,
         appId,
         stdout: result.stdout,
@@ -86,11 +89,17 @@ export class StaticAdapter {
 
   async repack(options: { inputPath: string; projectName: string; outputName?: string }): Promise<Record<string, unknown>> {
     const executable = this.requireBackend();
+    const inputPath = path.resolve(options.inputPath);
+    if (!existsSync(inputPath)) throw new WxmpError('STATIC_INPUT_NOT_FOUND', `Repack input path does not exist: ${inputPath}`);
     const project = safeProjectName(options.projectName);
     const outputRoot = resolveInside(this.config.workspaceRoot, project, 'wechat-miniapp', 'static', 'repacked');
     await fs.mkdir(outputRoot, { recursive: true });
     const outputPath = resolveInside(outputRoot, options.outputName ?? `repacked-${Date.now()}.wxapkg`);
-    const result = await this.run(executable, ['repack', `-in=${path.resolve(options.inputPath)}`, `-out=${outputPath}`]);
+    const result = await this.run(executable, ['repack', `-in=${inputPath}`, `-out=${outputPath}`]);
+    const output = await fs.stat(outputPath).catch(() => null);
+    if (!output?.isFile() || output.size === 0) {
+      throw new WxmpError('STATIC_ADAPTER_NO_OUTPUT', 'Gwxapkg repack exited without producing a non-empty package', { inputPath, outputPath });
+    }
     return { ...result, outputPath };
   }
 
@@ -104,6 +113,12 @@ export class StaticAdapter {
     const defaultName = isRepack ? `raw-${Date.now()}.wxapkg` : `raw-${Date.now()}`;
     const outputPath = resolveInside(outputRoot, outputName ?? defaultName);
     const result = await this.run(executable, [...args, `-out=${outputPath}`]);
+    if (isRepack) {
+      const output = await fs.stat(outputPath).catch(() => null);
+      if (!output?.isFile() || output.size === 0) {
+        throw new WxmpError('STATIC_ADAPTER_NO_OUTPUT', 'Gwxapkg raw repack exited without producing a non-empty package', { outputPath });
+      }
+    }
     return { ...result, outputPath };
   }
 
@@ -111,7 +126,14 @@ export class StaticAdapter {
     const base = path.resolve(root);
     if (!existsSync(base)) throw new WxmpError('STATIC_ROOT_NOT_FOUND', `Static output path does not exist: ${base}`);
     const flags = options.caseSensitive ? 'g' : 'gi';
-    const expression = options.regex ? new RegExp(query, flags) : new RegExp(escapeRegExp(query), flags);
+    let expression: RegExp;
+    try {
+      expression = options.regex ? new RegExp(query, flags) : new RegExp(escapeRegExp(query), flags);
+    } catch (error) {
+      throw new WxmpError('INVALID_REGEX', 'Static search regular expression is invalid', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     const matches: Array<{ path: string; line: number; text: string }> = [];
     const limit = Math.min(5000, Math.max(1, options.limit ?? 200));
     await walk(base, async (filePath, stat) => {
@@ -128,6 +150,8 @@ export class StaticAdapter {
 
   async buildIndex(root: string, projectName: string): Promise<Record<string, unknown>> {
     const base = path.resolve(root);
+    const rootStat = await fs.stat(base).catch(() => null);
+    if (!rootStat?.isDirectory()) throw new WxmpError('STATIC_ROOT_NOT_FOUND', `Static output directory does not exist: ${base}`);
     const urls = new Set<string>();
     const wxApis = new Set<string>();
     const routes = new Set<string>();

@@ -11,10 +11,13 @@ function mockConfig(workspaceRoot: string, gwxapkgPath: string | null = null): A
     workspaceRoot,
     profileDirs: [],
     legacyProfileDirs: [],
+    signatureDbPaths: [],
     gwxapkgPath,
     debugHost: '127.0.0.1',
     debugPort: 9421,
     eventLimit: 5000,
+    maxEvidenceEvents: 100_000,
+    maxEvidenceBytes: 256 * 1024 * 1024,
   };
 }
 
@@ -118,6 +121,16 @@ test('StaticAdapter search rejects nonexistent roots', async () => {
     () => adapter.search('/nonexistent/path', 'query'),
     (error: unknown) => error instanceof Error && error.message.includes('does not exist'),
   );
+});
+
+test('StaticAdapter buildIndex rejects nonexistent roots instead of producing an empty success', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-static-'));
+  const adapter = new StaticAdapter(mockConfig(root));
+  await assert.rejects(
+    () => adapter.buildIndex(path.join(root, 'missing'), 'fixture'),
+    (error: unknown) => error instanceof Error && error.message.includes('does not exist'),
+  );
+  await fs.rm(root, { recursive: true, force: true });
 });
 
 test('StaticAdapter rejects output overrides in decompile extra arguments', async () => {

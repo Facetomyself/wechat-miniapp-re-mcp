@@ -1,5 +1,7 @@
 import { promises as fs } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
+import readline from 'node:readline';
 import { AuditEvent, EvidenceFinding, JsonValue } from '../types.js';
 import { resolveInside, safeProjectName, sanitize } from '../security.js';
 
@@ -9,8 +11,24 @@ export class EvidenceStore {
   readonly eventsPath: string;
   private queue: Promise<void> = Promise.resolve();
   private eventCount = 0;
+  private eventBytes = 0;
+  private queuedEventCount = 0;
+  private queuedEventBytes = 0;
+  private droppedEventCount = 0;
+  private droppedEventBytes = 0;
+  private truncatedEventCount = 0;
+  private readonly corruptLineNumbers = new Set<number>();
+  private lastWriteError: string | null = null;
 
-  constructor(workspaceRoot: string, projectName: string, public readonly sessionId: string, private readonly eventLimit = 5000) {
+  constructor(
+    workspaceRoot: string,
+    projectName: string,
+    public readonly sessionId: string,
+    private readonly eventLimit = 5000,
+    private readonly maxEvents = 100_000,
+    private readonly maxBytes = 256 * 1024 * 1024,
+    private readonly maxEventBytes = 1024 * 1024,
+  ) {
     const project = safeProjectName(projectName);
     this.projectRoot = resolveInside(workspaceRoot, project, 'wechat-miniapp');
     this.sessionRoot = resolveInside(this.projectRoot, 'sessions', sessionId);
@@ -23,18 +41,34 @@ export class EvidenceStore {
   }
 
   append(type: string, data: unknown, meta: { contextId?: string; operation?: string } = {}): Promise<void> {
-    const event: AuditEvent = {
+    const event = {
       timestamp: new Date().toISOString(),
       sessionId: this.sessionId,
       contextId: meta.contextId,
       operation: meta.operation,
       type,
       data: sanitize(data) as JsonValue,
-    };
-    const line = `${JSON.stringify(event)}\n`;
-    this.eventCount += 1;
-    this.queue = this.queue.then(() => fs.appendFile(this.eventsPath, line, { encoding: 'utf8' }));
-    return this.queue;
+    } satisfies AuditEvent;
+    const encoded = encodeEvent(event, this.maxEventBytes);
+    if (this.queuedEventCount >= this.maxEvents || this.queuedEventBytes + encoded.bytes > this.maxBytes) {
+      this.droppedEventCount += 1;
+      this.droppedEventBytes += encoded.bytes;
+      return Promise.resolve();
+    }
+    if (encoded.truncated) this.truncatedEventCount += 1;
+    this.queuedEventCount += 1;
+    this.queuedEventBytes += encoded.bytes;
+    const write = this.queue.then(async () => {
+      try {
+        await fs.appendFile(this.eventsPath, encoded.line, { encoding: 'utf8' });
+        this.eventCount += 1;
+        this.eventBytes += encoded.bytes;
+      } catch (error) {
+        this.lastWriteError = error instanceof Error ? error.message : String(error);
+      }
+    });
+    this.queue = write;
+    return write;
   }
 
   async flush(): Promise<void> {
@@ -57,35 +91,42 @@ export class EvidenceStore {
 
   async readEvents(offset = 0, limit = 100, type?: string): Promise<{ total: number; items: AuditEvent[] }> {
     await this.queue;
-    let text = '';
-    try {
-      text = await fs.readFile(this.eventsPath, 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    const items = text
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as AuditEvent)
-      .filter((event) => !type || event.type === type);
     const safeOffset = Math.max(0, Math.trunc(offset));
     const safeLimit = Math.min(this.eventLimit, Math.max(1, Math.trunc(limit)));
-    return { total: items.length, items: items.slice(safeOffset, safeOffset + safeLimit) };
+    let total = 0;
+    const items: AuditEvent[] = [];
+    for await (const event of this.iterateEvents()) {
+      if (type && event.type !== type) continue;
+      if (total >= safeOffset && items.length < safeLimit) items.push(event);
+      total += 1;
+    }
+    return { total, items };
   }
 
   async exportBundle(summary: Record<string, unknown>, findings: EvidenceFinding[]): Promise<Record<string, string>> {
     await this.queue;
-    const events = await this.readAllEvents();
-    const eventTypeCounts = Object.fromEntries(
-      [...events.reduce((counts, event) => counts.set(event.type, (counts.get(event.type) ?? 0) + 1), new Map<string, number>())]
-        .sort(([left], [right]) => left.localeCompare(right)),
-    );
-    const normalizedFindings = deriveFindings(summary, findings);
+    const eventTypeCounts = await this.eventTypeCounts();
+    const normalizedFindings = deriveFindings(summary, findings, {
+      droppedEventCount: this.droppedEventCount,
+      droppedEventBytes: this.droppedEventBytes,
+      truncatedEventCount: this.truncatedEventCount,
+      corruptLineCount: this.corruptLineNumbers.size,
+      lastWriteError: this.lastWriteError,
+    });
     const manifest = {
       schemaVersion: 1,
       generatedAt: new Date().toISOString(),
       sessionId: this.sessionId,
       eventCount: this.eventCount,
+      eventBytes: this.eventBytes,
+      droppedEventCount: this.droppedEventCount,
+      droppedEventBytes: this.droppedEventBytes,
+      truncatedEventCount: this.truncatedEventCount,
+      corruptLineCount: this.corruptLineNumbers.size,
+      maxEvents: this.maxEvents,
+      maxBytes: this.maxBytes,
+      maxEventBytes: this.maxEventBytes,
+      lastWriteError: this.lastWriteError,
       events: this.eventsPath,
       eventTypeCounts,
       findingCount: normalizedFindings.length,
@@ -111,18 +152,43 @@ export class EvidenceStore {
     return { manifestPath, findingsPath, reportPath, triagePath, eventsPath: this.eventsPath };
   }
 
-  private async readAllEvents(): Promise<AuditEvent[]> {
-    let text = '';
+  private async *iterateEvents(): AsyncGenerator<AuditEvent> {
     try {
-      text = await fs.readFile(this.eventsPath, 'utf8');
+      const stream = createReadStream(this.eventsPath, { encoding: 'utf8' });
+      const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      let lineNumber = 0;
+      for await (const line of lines) {
+        lineNumber += 1;
+        if (!line.trim()) continue;
+        try {
+          yield JSON.parse(line) as AuditEvent;
+        } catch {
+          this.corruptLineNumbers.add(lineNumber);
+        }
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    return text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as AuditEvent);
+  }
+
+  private async eventTypeCounts(): Promise<Record<string, number>> {
+    const counts = new Map<string, number>();
+    for await (const event of this.iterateEvents()) counts.set(event.type, (counts.get(event.type) ?? 0) + 1);
+    return Object.fromEntries([...counts].sort(([left], [right]) => left.localeCompare(right)));
   }
 }
 
-function deriveFindings(summary: Record<string, unknown>, findings: EvidenceFinding[]): EvidenceFinding[] {
+function deriveFindings(
+  summary: Record<string, unknown>,
+  findings: EvidenceFinding[],
+  evidenceHealth: {
+    droppedEventCount: number;
+    droppedEventBytes: number;
+    truncatedEventCount: number;
+    corruptLineCount: number;
+    lastWriteError: string | null;
+  },
+): EvidenceFinding[] {
   const output = findings.map((finding) => ({ ...finding, evidenceTypes: [...finding.evidenceTypes] }));
   const state = String(summary.state ?? 'unknown');
   if (['waiting_for_runtime', 'disconnected', 'failed'].includes(state) && !output.some((finding) => finding.id === 'runtime-not-ready')) {
@@ -138,7 +204,71 @@ function deriveFindings(summary: Record<string, unknown>, findings: EvidenceFind
       lastObservedAt: now,
     });
   }
+  if (evidenceHealth.droppedEventCount > 0 && !output.some((finding) => finding.id === 'evidence-overflow')) {
+    output.push(derivedFinding({
+      id: 'evidence-overflow',
+      title: 'Evidence event limit was reached',
+      severity: 'high',
+      summary: `${evidenceHealth.droppedEventCount} events (${evidenceHealth.droppedEventBytes} bytes) were dropped after the configured evidence cap was reached.`,
+      evidenceTypes: ['evidence.overflow'],
+    }));
+  }
+  if (evidenceHealth.truncatedEventCount > 0 && !output.some((finding) => finding.id === 'evidence-event-truncated')) {
+    output.push(derivedFinding({
+      id: 'evidence-event-truncated',
+      title: 'Oversized evidence events were truncated',
+      severity: 'medium',
+      summary: `${evidenceHealth.truncatedEventCount} events exceeded the per-event byte limit and were persisted as bounded previews.`,
+      evidenceTypes: ['evidence.event_truncated'],
+    }));
+  }
+  if (evidenceHealth.corruptLineCount > 0 && !output.some((finding) => finding.id === 'evidence-corrupt-lines')) {
+    output.push(derivedFinding({
+      id: 'evidence-corrupt-lines',
+      title: 'Evidence stream contains malformed lines',
+      severity: 'high',
+      summary: `${evidenceHealth.corruptLineCount} malformed NDJSON lines were skipped while exporting evidence.`,
+      evidenceTypes: ['evidence.corrupt_line'],
+    }));
+  }
+  if (evidenceHealth.lastWriteError && !output.some((finding) => finding.id === 'evidence-write-error')) {
+    output.push(derivedFinding({
+      id: 'evidence-write-error',
+      title: 'Evidence persistence reported a write error',
+      severity: 'critical',
+      summary: evidenceHealth.lastWriteError,
+      evidenceTypes: ['evidence.write_error'],
+    }));
+  }
   return output.sort((left, right) => severityRank(right.severity) - severityRank(left.severity) || left.id.localeCompare(right.id));
+}
+
+function encodeEvent(event: AuditEvent, maxEventBytes: number): { line: string; bytes: number; truncated: boolean } {
+  const line = `${JSON.stringify(event)}\n`;
+  const bytes = Buffer.byteLength(line, 'utf8');
+  if (bytes <= maxEventBytes) return { line, bytes, truncated: false };
+  const preview = JSON.stringify(event.data).slice(0, Math.min(16_000, Math.max(256, Math.floor(maxEventBytes / 2))));
+  const truncatedEvent: AuditEvent = {
+    ...event,
+    data: {
+      truncated: true,
+      reason: 'event-byte-limit',
+      originalBytes: bytes,
+      preview,
+    },
+  };
+  const truncatedLine = `${JSON.stringify(truncatedEvent)}\n`;
+  return { line: truncatedLine, bytes: Buffer.byteLength(truncatedLine, 'utf8'), truncated: true };
+}
+
+function derivedFinding(input: Pick<EvidenceFinding, 'id' | 'title' | 'severity' | 'summary' | 'evidenceTypes'>): EvidenceFinding {
+  const now = new Date().toISOString();
+  return {
+    ...input,
+    status: 'open',
+    firstObservedAt: now,
+    lastObservedAt: now,
+  };
 }
 
 function severityRank(value: EvidenceFinding['severity']): number {

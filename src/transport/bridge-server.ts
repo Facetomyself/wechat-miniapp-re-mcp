@@ -29,7 +29,7 @@ export class WmpfBridgeServer {
     if (this.server) return;
     if (this.startPromise) return this.startPromise;
     this.startPromise = new Promise<void>((resolve, reject) => {
-      const server = new WebSocketServer({ host: this.host, port: this.port, maxPayload: 0 });
+      const server = new WebSocketServer({ host: this.host, port: this.port, maxPayload: 64 * 1024 * 1024 });
       const onError = (error: Error) => {
         server.close();
         this.startPromise = null;

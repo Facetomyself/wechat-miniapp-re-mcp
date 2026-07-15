@@ -6,7 +6,7 @@ export class DevToolsProxy {
   private server: WebSocketServer | null = null;
   private unsubscribe: (() => void) | null = null;
 
-  async start(channel: CdpChannel, port: number, host = '127.0.0.1'): Promise<Record<string, unknown>> {
+  async start(channel: CdpChannel, port: number, contextId = '', host = '127.0.0.1'): Promise<Record<string, unknown>> {
     if (this.server) throw new WxmpError('DEVTOOLS_PROXY_RUNNING', 'DevTools proxy is already running');
     const server = new WebSocketServer({ host, port });
     await new Promise<void>((resolve, reject) => {
@@ -24,15 +24,30 @@ export class DevToolsProxy {
           socket.send(JSON.stringify({ error: { message: 'Invalid CDP JSON' } }));
           return;
         }
-        void channel.sendObject(command).catch((error) => {
+        const clientId = command.id;
+        const method = typeof command.method === 'string' ? command.method : '';
+        if (!method || !Number.isSafeInteger(Number(clientId))) {
+          socket.send(JSON.stringify({ id: clientId ?? null, error: { message: 'CDP command requires an integer id and method' } }));
+          return;
+        }
+        void channel.send(method, (command.params ?? {}) as Record<string, unknown>, contextId).then((response) => {
+          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ ...response, id: clientId }));
+        }).catch((error) => {
           if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ id: command.id, error: { message: error instanceof Error ? error.message : String(error) } }));
+            socket.send(JSON.stringify({ id: clientId, error: { message: error instanceof Error ? error.message : String(error) } }));
           }
         });
       });
       socket.on('close', () => clients.delete(socket));
     });
-    this.unsubscribe = channel.onRaw((payload) => {
+    this.unsubscribe = channel.onRaw((payload, eventContextId) => {
+      if (contextId && eventContextId && eventContextId !== contextId) return;
+      try {
+        const message = JSON.parse(payload) as Record<string, unknown>;
+        if (message.id !== undefined) return;
+      } catch {
+        return;
+      }
       for (const client of clients) if (client.readyState === WebSocket.OPEN) client.send(payload);
     });
     this.server = server;

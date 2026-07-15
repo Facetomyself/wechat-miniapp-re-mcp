@@ -24,7 +24,20 @@ export interface ProfilePromotion {
   note?: string;
 }
 
+interface SignatureDatabase {
+  schemaVersion: number;
+  signatures?: Record<string, {
+    verifiedVersions?: number[];
+    pattern?: string;
+    aobPre?: string;
+    adjustment?: number;
+  }>;
+}
+
 function parseOffset(value: string): number {
+  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(value)) {
+    throw new WxmpError('INVALID_PROFILE', `Invalid offset: ${value}`);
+  }
   const parsed = Number.parseInt(value, value.toLowerCase().startsWith('0x') ? 16 : 10);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
     throw new WxmpError('INVALID_PROFILE', `Invalid offset: ${value}`);
@@ -115,13 +128,24 @@ export class ProfileManager {
   constructor(
     private readonly profileDirs: string[],
     private readonly legacyProfileDirs: string[],
+    private readonly signatureDbPaths: string[] = [],
   ) {}
 
   async load(version: number, explicitPath?: string): Promise<{ profile: OffsetProfile; path: string }> {
     const candidates: Array<{ path: string; legacy: boolean }> = [];
-    if (explicitPath) candidates.push({ path: path.resolve(explicitPath), legacy: false });
+    if (explicitPath) {
+      const resolved = path.resolve(explicitPath);
+      if (!existsSync(resolved)) {
+        throw new WxmpError('PROFILE_NOT_FOUND', `Explicit profile path does not exist: ${resolved}`, {
+          version,
+          profilePath: resolved,
+        });
+      }
+      candidates.push({ path: resolved, legacy: false });
+    }
     for (const dir of this.profileDirs) {
       candidates.push({ path: path.join(dir, `windows-${version}.json`), legacy: false });
+      candidates.push({ path: path.join(dir, `windows-${version}-reviewed.json`), legacy: false });
       candidates.push({ path: path.join(dir, `profile.${version}.json`), legacy: false });
     }
     for (const dir of this.legacyProfileDirs) {
@@ -165,6 +189,12 @@ export class ProfileManager {
     }
     if (profile.provenance.source === 'generated' && profile.review?.decision !== 'promoted') {
       throw new WxmpError('PROFILE_REVIEW_REQUIRED', 'Generated profiles require recorded promotion evidence before runtime injection', {
+        version: profile.wmpfVersion,
+        provenance: profile.provenance,
+      });
+    }
+    if (profile.provenance.source === 'clean-room' && profile.review?.decision !== 'promoted') {
+      throw new WxmpError('PROFILE_REVIEW_REQUIRED', 'Clean-room profiles require recorded review evidence before runtime injection', {
         version: profile.wmpfVersion,
         provenance: profile.provenance,
       });
@@ -234,7 +264,14 @@ export class ProfileManager {
     const buffer = await fs.readFile(modulePath);
     const matches: Partial<Record<SignatureSpec['name'], number[]>> = {};
     for (const signature of signatures) {
-      const found = findPattern(buffer, signature.pattern).map((offset) => offset + (signature.adjustment ?? 0));
+      const adjustment = signature.adjustment ?? 0;
+      if (!Number.isSafeInteger(adjustment)) {
+        throw new WxmpError('INVALID_SIGNATURE', `Signature adjustment for ${signature.name} must be a safe integer`, {
+          name: signature.name,
+          adjustment,
+        });
+      }
+      const found = findPattern(buffer, signature.pattern).map((offset) => offset + adjustment);
       matches[signature.name] = found;
     }
     const cdp = matches.cdpFilter ?? [];
@@ -270,15 +307,36 @@ export class ProfileManager {
       },
     });
   }
+
+  async signaturesForVersion(version: number): Promise<SignatureSpec[]> {
+    for (const databasePath of this.signatureDbPaths) {
+      if (!existsSync(databasePath)) continue;
+      const database = JSON.parse(await fs.readFile(databasePath, 'utf8')) as SignatureDatabase;
+      const entries = database.signatures ?? {};
+      const output: SignatureSpec[] = [];
+      for (const name of ['cdpFilter', 'loadStart'] as const) {
+        const entry = entries[name];
+        if (!entry || !entry.verifiedVersions?.includes(version)) continue;
+        const pattern = entry.pattern ?? entry.aobPre;
+        if (!pattern) continue;
+        output.push({ name, pattern, adjustment: entry.adjustment });
+      }
+      if (output.length === 2) return output;
+    }
+    throw new WxmpError('PROFILE_SIGNATURE_NOT_FOUND', `No verified AOB signature set is available for WMPF ${version}`, {
+      version,
+      searched: this.signatureDbPaths,
+    });
+  }
 }
 
 export function findPattern(buffer: Buffer, pattern: string): number[] {
   const tokens = pattern.trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) throw new WxmpError('INVALID_SIGNATURE', 'Signature pattern is empty');
-  const bytes = tokens.map((token) => (token === '?' || token === '??' ? null : Number.parseInt(token, 16)));
-  if (bytes.some((byte) => byte !== null && (!Number.isInteger(byte) || byte < 0 || byte > 255))) {
+  if (tokens.some((token) => !/^(?:\?|\?\?|[0-9a-f]{2})$/i.test(token))) {
     throw new WxmpError('INVALID_SIGNATURE', `Invalid byte signature: ${pattern}`);
   }
+  const bytes = tokens.map((token) => (token === '?' || token === '??' ? null : Number.parseInt(token, 16)));
   const matches: number[] = [];
   outer: for (let offset = 0; offset <= buffer.length - bytes.length; offset += 1) {
     for (let index = 0; index < bytes.length; index += 1) {

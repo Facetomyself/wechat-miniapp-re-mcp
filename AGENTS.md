@@ -16,6 +16,8 @@
 - Frida is imported lazily by the runtime adapter.
 - Static engines are isolated behind adapters; do not embed GPL implementations into the MIT core.
 - Unsupported runtime capabilities must return structured evidence, never synthetic success.
+- A connected bridge proves transport only. Debugger/network require successful CDP probes; trace/request hooks require non-zero installed wrappers and are tracked per context.
+- Bundled clean-room profiles use canonical `windows-<version>.json` names and load before external legacy directories. Third-party profile contents remain outside Git.
 
 ## Development
 
