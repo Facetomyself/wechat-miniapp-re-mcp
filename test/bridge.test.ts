@@ -51,6 +51,55 @@ test('bridge assigns a pending session and routes CDP in both directions', async
   await bridge.stop();
 });
 
+test('bridge requeues the same session after an unexpected disconnect', async () => {
+  const port = await freePort();
+  const connected: string[] = [];
+  const disconnected: string[] = [];
+  const bridge = new WmpfBridgeServer('127.0.0.1', port, {
+    onCdp: () => undefined,
+    onContext: () => undefined,
+    onEnvelope: () => undefined,
+    onConnected: (sessionId) => connected.push(sessionId),
+    onDisconnected: (sessionId) => disconnected.push(sessionId),
+  });
+  await bridge.start();
+  bridge.prepare('session-1');
+
+  const first = await connect(port);
+  assert.equal(await bridge.waitForConnection('session-1', 500), true);
+  first.close();
+  await waitUntil(() => disconnected.length === 1);
+  assert.deepEqual((bridge.info().pendingSessions as string[]), ['session-1']);
+
+  const second = await connect(port);
+  await waitUntil(() => connected.length === 2);
+  assert.equal(bridge.isConnected('session-1'), true);
+  assert.deepEqual(connected, ['session-1', 'session-1']);
+
+  bridge.release('session-1');
+  second.close();
+  await bridge.stop();
+});
+
+test('bridge rejects a second concurrent runtime reservation', async () => {
+  const port = await freePort();
+  const bridge = new WmpfBridgeServer('127.0.0.1', port, {
+    onCdp: () => undefined,
+    onContext: () => undefined,
+    onEnvelope: () => undefined,
+    onConnected: () => undefined,
+    onDisconnected: () => undefined,
+  });
+  await bridge.start();
+  bridge.prepare('session-1');
+  assert.throws(
+    () => bridge.prepare('session-2'),
+    (error: unknown) => error instanceof Error && error.message.includes('already reserved'),
+  );
+  bridge.release('session-1');
+  await bridge.stop();
+});
+
 async function freePort(): Promise<number> {
   const server = net.createServer();
   await new Promise<void>((resolve, reject) => {
@@ -61,6 +110,15 @@ async function freePort(): Promise<number> {
   if (!address || typeof address === 'string') throw new Error('Unable to reserve a test port');
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return address.port;
+}
+
+async function connect(port: number): Promise<WebSocket> {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', () => resolve());
+    socket.once('error', reject);
+  });
+  return socket;
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {

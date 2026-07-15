@@ -43,11 +43,20 @@ export type SessionState =
   | 'closed'
   | 'failed';
 
+export interface ProfileReview {
+  reviewer: string;
+  reviewedAt: string;
+  evidence: string[];
+  decision: 'promoted' | 'rejected';
+  note?: string;
+}
+
 export interface OffsetProfile {
   schemaVersion: 1;
   platform: 'windows' | 'darwin';
   wmpfVersion: number;
   moduleName: string;
+  moduleSha256?: string;
   cdpFilterOffset: string;
   loadStartOffset: string;
   sceneOffsets: number[];
@@ -57,6 +66,7 @@ export interface OffsetProfile {
     confidence: 'high' | 'medium' | 'candidate' | 'external';
     note?: string;
   };
+  review?: ProfileReview;
 }
 
 export interface AuditEvent {
@@ -66,6 +76,17 @@ export interface AuditEvent {
   type: string;
   operation?: string;
   data: JsonValue;
+}
+
+export interface EvidenceFinding {
+  id: string;
+  title: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  status: 'open' | 'resolved' | 'accepted';
+  summary: string;
+  evidenceTypes: string[];
+  firstObservedAt: string;
+  lastObservedAt: string;
 }
 
 export interface NetworkRecord {

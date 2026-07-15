@@ -119,3 +119,27 @@ test('StaticAdapter search rejects nonexistent roots', async () => {
     (error: unknown) => error instanceof Error && error.message.includes('does not exist'),
   );
 });
+
+test('StaticAdapter rejects output overrides in decompile extra arguments', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-static-'));
+  const backend = path.join(root, 'gwxapkg.exe');
+  await fs.writeFile(backend, 'fixture');
+  const adapter = new StaticAdapter(mockConfig(root, backend));
+  await assert.rejects(
+    adapter.decompile({ inputPath: path.join(root, 'fixture.wxapkg'), projectName: 'fixture', extraArgs: ['-out=C:\\escape'] }),
+    (error: unknown) => error instanceof Error && error.message.includes('cannot override'),
+  );
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('StaticAdapter raw mode rejects caller-controlled output arguments', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-static-'));
+  const backend = path.join(root, 'gwxapkg.exe');
+  await fs.writeFile(backend, 'fixture');
+  const adapter = new StaticAdapter(mockConfig(root, backend));
+  await assert.rejects(
+    adapter.raw(['-out=C:\\escape'], 'fixture'),
+    (error: unknown) => error instanceof Error && error.message.includes('cannot override'),
+  );
+  await fs.rm(root, { recursive: true, force: true });
+});

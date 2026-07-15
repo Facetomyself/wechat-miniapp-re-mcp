@@ -58,6 +58,7 @@ export class StaticAdapter {
     extraArgs?: string[];
   }): Promise<Record<string, unknown>> {
     const executable = this.requireBackend();
+    rejectReservedArgs(options.extraArgs ?? [], ['-in', '-out', '-id']);
     const project = safeProjectName(options.projectName);
     const outputRoot = resolveInside(this.config.workspaceRoot, project, 'wechat-miniapp', 'static');
     const outputPath = resolveInside(outputRoot, options.outputName ?? `decompile-${Date.now()}`);
@@ -93,8 +94,17 @@ export class StaticAdapter {
     return { ...result, outputPath };
   }
 
-  async raw(args: string[]): Promise<Record<string, unknown>> {
-    return this.run(this.requireBackend(), args);
+  async raw(args: string[], projectName: string, outputName?: string): Promise<Record<string, unknown>> {
+    const executable = this.requireBackend();
+    rejectReservedArgs(args, ['-out']);
+    const project = safeProjectName(projectName);
+    const outputRoot = resolveInside(this.config.workspaceRoot, project, 'wechat-miniapp', 'static', 'raw');
+    await fs.mkdir(outputRoot, { recursive: true });
+    const isRepack = args.some((arg) => arg.toLowerCase() === 'repack');
+    const defaultName = isRepack ? `raw-${Date.now()}.wxapkg` : `raw-${Date.now()}`;
+    const outputPath = resolveInside(outputRoot, outputName ?? defaultName);
+    const result = await this.run(executable, [...args, `-out=${outputPath}`]);
+    return { ...result, outputPath };
   }
 
   async search(root: string, query: string, options: { regex?: boolean; caseSensitive?: boolean; limit?: number } = {}): Promise<Record<string, unknown>> {
@@ -205,4 +215,17 @@ function escapeRegExp(value: string): string {
 
 function extractAppId(value: string): string | undefined {
   return path.resolve(value).split(path.sep).find((segment) => /^wx[a-zA-Z0-9_-]{6,}$/.test(segment));
+}
+
+function rejectReservedArgs(args: string[], reserved: string[]): void {
+  const invalid = args.filter((arg) => reserved.some((name) => {
+    const lower = arg.toLowerCase();
+    return lower === name || lower.startsWith(`${name}=`);
+  }));
+  if (invalid.length) {
+    throw new WxmpError('STATIC_RESERVED_ARGUMENT', 'Static adapter arguments cannot override controlled input, output, or app-id fields', {
+      invalid,
+      reserved,
+    });
+  }
 }

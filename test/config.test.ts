@@ -40,3 +40,10 @@ test('defaultPackageRoots returns Windows AppData path on win32', () => {
     assert.ok(roots[0].includes('com.tencent.xinWeChat'));
   }
 });
+
+test('loadConfig falls back from invalid event limits', () => {
+  const prev = process.env.WXMP_EVENT_LIMIT;
+  process.env.WXMP_EVENT_LIMIT = 'not-a-number';
+  assert.equal(loadConfig().eventLimit, 5000);
+  if (prev !== undefined) process.env.WXMP_EVENT_LIMIT = prev; else delete process.env.WXMP_EVENT_LIMIT;
+});

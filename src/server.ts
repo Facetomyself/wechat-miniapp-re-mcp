@@ -3,12 +3,13 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { WxmpApp } from './app.js';
 import { errorPayload } from './errors.js';
 import { buildTools } from './tools/registry.js';
+import { VERSION } from './version.js';
 
 export function createServer(app: WxmpApp): Server {
   const entries = buildTools(app);
   const handlers = new Map(entries.map((entry) => [entry.tool.name, entry]));
   const server = new Server(
-    { name: 'wechat-miniapp-re-mcp', version: '0.1.0' },
+    { name: 'wechat-miniapp-re-mcp', version: VERSION },
     { capabilities: { tools: {} } },
   );
 

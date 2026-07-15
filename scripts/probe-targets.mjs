@@ -1,5 +1,5 @@
 // Quick target discovery probe
-import { discoverTargets } from '../src/runtime/target-discovery.js';
+import { discoverTargets } from '../build/src/runtime/target-discovery.js';
 const targets = await discoverTargets();
 console.log(JSON.stringify({ ok: true, count: targets.length, targets: targets.map(t => ({
   pid: t.pid,

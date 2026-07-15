@@ -10,6 +10,7 @@ All tools use the `wxmp_*` prefix. Dynamic tools require `session_id`; tools tha
 - `wxmp_attach`
 - `wxmp_detach`
 - `wxmp_session_status`
+- `wxmp_wait_for_runtime`
 - `wxmp_list_contexts`
 - `wxmp_select_context`
 - `wxmp_get_runtime_info`
@@ -58,14 +59,17 @@ All tools use the `wxmp_*` prefix. Dynamic tools require `session_id`; tools tha
 - `wxmp_repack`
 - `wxmp_raw_adapter`
 
+`wxmp_raw_adapter` requires `project_name`; caller-supplied `-out` arguments are rejected and backend output is forced below the configured workspace.
+
 ## WMPF Profile workflow
 
 - `wxmp_detect_wmpf`
 - `wxmp_profile_probe`
 - `wxmp_profile_generate`
 - `wxmp_profile_validate`
+- `wxmp_profile_promote`
 
-Generated profiles have candidate confidence and are never injected automatically. `wxmp_attach` requires an explicit valid profile from the clean-room profile directory, an explicit path, or a configured external legacy directory.
+Generated profiles include the target module SHA-256, have candidate confidence, and are rejected by `wxmp_attach` until `wxmp_profile_promote` records a reviewer, timestamp, evidence references, and a `medium`/`high` promotion decision. Explicit profiles must match the target WMPF version. Clean-room/generated profiles must bind to `moduleSha256`; external legacy profiles remain compatibility inputs and are reported as hash-unbound findings.
 
 ## Evidence
 

@@ -7,6 +7,7 @@ import { buildCloudFunctionExpression, buildReplayExpression, buildWxApiExpressi
 import { SignatureSpec } from '../runtime/profile.js';
 import { resolveInside, safeProjectName } from '../security.js';
 import { ToolEntry } from './types.js';
+import { VERSION } from '../version.js';
 
 type Schema = Record<string, unknown>;
 const stringProp = (description: string): Schema => ({ type: 'string', description });
@@ -53,9 +54,11 @@ function stringArray(args: Record<string, unknown>, key: string): string[] {
   return value as string[];
 }
 
-function sessionContext(app: WxmpApp, args: Record<string, unknown>): { sessionId: string; contextId: string } {
+function sessionContext(app: WxmpApp, args: Record<string, unknown>, required = true): { sessionId: string; contextId: string } {
   const sessionId = text(args, 'session_id');
-  return { sessionId, contextId: app.sessions.contextId(sessionId, optionalText(args, 'context_id')) };
+  const contextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
+  if (required && !contextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'Select or provide a WMPF JavaScript context before invoking this tool', { sessionId });
+  return { sessionId, contextId };
 }
 
 export function buildTools(app: WxmpApp): ToolEntry[] {
@@ -63,7 +66,7 @@ export function buildTools(app: WxmpApp): ToolEntry[] {
 
   tools.push(entry('wxmp_health', 'Report cold-start health and lazy runtime capabilities.', objectSchema({}), async () => ({
     content: [{ type: 'text', text: JSON.stringify({ ok: true, data: {
-      name: 'wechat-miniapp-re-mcp', version: '0.1.0', platform: process.platform,
+      name: 'wechat-miniapp-re-mcp', version: VERSION, platform: process.platform,
       workspaceRoot: app.config.workspaceRoot, bridge: app.sessions.bridge.info(), staticAdapter: app.staticAdapter.info(),
       startupRequiresTarget: false,
     } }, null, 2) }],
@@ -95,6 +98,8 @@ export function buildTools(app: WxmpApp): ToolEntry[] {
 
   tools.push(entry('wxmp_session_status', 'Read one session state, capabilities, contexts, and evidence path.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => result(app.sessions.publicStatus(app.sessions.get(text(args, 'session_id'))))));
 
+  tools.push(entry('wxmp_wait_for_runtime', 'Wait for an attached or disconnected WMPF session to connect again without reinjecting Frida.', objectSchema({ session_id: stringProp('Session identifier.'), timeout_ms: numberProp('Wait timeout in milliseconds.') }, ['session_id']), async (args) => result(await app.sessions.waitForRuntime(text(args, 'session_id'), Math.min(120_000, Math.max(1, num(args, 'timeout_ms', 30_000)))))));
+
   tools.push(entry('wxmp_list_contexts', 'List JS contexts observed for a WMPF session.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => {
     const session = app.sessions.get(text(args, 'session_id'));
     return result({ selectedContextId: session.selectedContextId, contexts: [...session.contexts.values()] });
@@ -121,7 +126,7 @@ export function buildTools(app: WxmpApp): ToolEntry[] {
   tools.push(entry('wxmp_raw_cdp', 'Send an arbitrary CDP method and parameters to WMPF.', objectSchema({
     session_id: stringProp('Session identifier.'), context_id: stringProp('Optional JS context.'), method: stringProp('CDP method.'), params: { type: 'object', description: 'CDP params object.', additionalProperties: true }, timeout_ms: numberProp('Timeout in milliseconds.'),
   }, ['session_id', 'method']), async (args) => {
-    const { sessionId, contextId } = sessionContext(app, args);
+    const { sessionId, contextId } = sessionContext(app, args, false);
     return result(await app.sessions.get(sessionId).channel.send(text(args, 'method'), (args.params ?? {}) as Record<string, unknown>, contextId, num(args, 'timeout_ms', 10_000)));
   }));
 
@@ -242,7 +247,7 @@ export function buildTools(app: WxmpApp): ToolEntry[] {
   tools.push(entry('wxmp_static_search', 'Search restored JS/WXML/WXSS/WXS/JSON sources.', objectSchema({ root: stringProp('Restored source root.'), query: stringProp('Text or regex.'), regex: booleanProp('Regex mode.'), case_sensitive: booleanProp('Case-sensitive.'), limit: numberProp('Max results.') }, ['root', 'query']), async (args) => result(await app.staticAdapter.search(text(args, 'root'), text(args, 'query'), { regex: bool(args, 'regex'), caseSensitive: bool(args, 'case_sensitive'), limit: num(args, 'limit', 200) }))));
   tools.push(entry('wxmp_build_index', 'Build URL, wx API, route, and file indexes for restored sources.', objectSchema({ root: stringProp('Restored source root.'), project_name: stringProp('Workspace project.') }, ['root', 'project_name']), async (args) => result(await app.staticAdapter.buildIndex(text(args, 'root'), text(args, 'project_name')))));
   tools.push(entry('wxmp_repack', 'Repack a controlled restored source tree with Gwxapkg.', objectSchema({ input_path: stringProp('Restored source directory.'), project_name: stringProp('Workspace project.'), output_name: stringProp('Output wxapkg filename.') }, ['input_path', 'project_name']), async (args) => result(await app.staticAdapter.repack({ inputPath: text(args, 'input_path'), projectName: text(args, 'project_name'), outputName: optionalText(args, 'output_name') }))));
-  tools.push(entry('wxmp_raw_adapter', 'Invoke the configured static adapter with raw arguments.', objectSchema({ args: { type: 'array', items: { type: 'string' } } }, ['args']), async (args) => result(await app.staticAdapter.raw(stringArray(args, 'args')))));
+  tools.push(entry('wxmp_raw_adapter', 'Invoke the configured static adapter while keeping output inside the controlled workspace.', objectSchema({ project_name: stringProp('Workspace project.'), output_name: stringProp('Optional controlled output name.'), args: { type: 'array', items: { type: 'string' } } }, ['project_name', 'args']), async (args) => result(await app.staticAdapter.raw(stringArray(args, 'args'), text(args, 'project_name'), optionalText(args, 'output_name')))));
 
   tools.push(entry('wxmp_detect_wmpf', 'Detect WMPF versions and process roles.', objectSchema({}), async () => result(await app.sessions.listTargets())));
   tools.push(entry('wxmp_profile_probe', 'Load and statically probe an offset profile against a WMPF module.', objectSchema({ pid: numberProp('WMPF PID.'), profile_path: stringProp('Optional profile path.') }, ['pid']), async (args) => { const targets = await app.sessions.listTargets(); const target = targets.find((item) => item.pid === num(args, 'pid')); if (!target || !target.version) throw new WxmpError('TARGET_NOT_FOUND', 'Target or version not found'); const loaded = await app.sessions.profileManager().load(target.version, optionalText(args, 'profile_path')); return result(await app.sessions.profileManager().probe(target, loaded.profile)); }));
@@ -251,7 +256,56 @@ export function buildTools(app: WxmpApp): ToolEntry[] {
     const signatures = args.signatures as SignatureSpec[]; const sceneOffsets = (args.scene_offsets as number[]).map(Number); const profile = await app.sessions.profileManager().generate(target, signatures, sceneOffsets);
     const project = safeProjectName(text(args, 'project_name')); const dir = resolveInside(app.config.workspaceRoot, project, 'wechat-miniapp', 'profiles'); await fs.mkdir(dir, { recursive: true }); const outputPath = resolveInside(dir, `windows-${profile.wmpfVersion}-candidate.json`); await fs.writeFile(outputPath, `${JSON.stringify(profile, null, 2)}\n`, 'utf8'); return result({ profile, outputPath, warning: 'candidate profile requires validation and runtime review' });
   }));
-  tools.push(entry('wxmp_profile_validate', 'Validate profile schema, module hash, and offset bounds without injection.', objectSchema({ pid: numberProp('WMPF PID.'), profile_path: stringProp('Profile path.') }, ['pid', 'profile_path']), async (args) => { const target = (await app.sessions.listTargets()).find((item) => item.pid === num(args, 'pid')); if (!target || !target.version) throw new WxmpError('TARGET_NOT_FOUND', 'Target not found'); const loaded = await app.sessions.profileManager().load(target.version, text(args, 'profile_path')); return result(await app.sessions.profileManager().probe(target, loaded.profile)); }));
+  tools.push(entry('wxmp_profile_validate', 'Validate profile schema, module hash, offset bounds, and injection readiness without injection.', objectSchema({ pid: numberProp('WMPF PID.'), profile_path: stringProp('Profile path.') }, ['pid', 'profile_path']), async (args) => {
+    const target = (await app.sessions.listTargets()).find((item) => item.pid === num(args, 'pid'));
+    if (!target || !target.version) throw new WxmpError('TARGET_NOT_FOUND', 'Target not found');
+    const manager = app.sessions.profileManager();
+    const loaded = await manager.load(target.version, text(args, 'profile_path'));
+    const probe = await manager.probe(target, loaded.profile);
+    let injectable = true;
+    let injectionBlock: Record<string, unknown> | null = null;
+    try {
+      manager.assertInjectable(loaded.profile);
+    } catch (error) {
+      injectable = false;
+      injectionBlock = error instanceof WxmpError ? { code: error.code, message: error.message, details: error.details } : { message: String(error) };
+    }
+    return result({ ...probe, injectable: injectable && probe.valid === true, injectionBlock });
+  }));
+  tools.push(entry('wxmp_profile_promote', 'Promote a hash-matched generated candidate with explicit review evidence; writes a reviewed profile inside the controlled workspace.', objectSchema({
+    pid: numberProp('WMPF PID.'),
+    candidate_path: stringProp('Generated candidate profile path.'),
+    project_name: stringProp('Workspace project.'),
+    confidence: { enum: ['medium', 'high'] },
+    reviewer: stringProp('Reviewer identifier.'),
+    evidence: { type: 'array', items: { type: 'string' }, minItems: 1 },
+    note: stringProp('Optional review note.'),
+  }, ['pid', 'candidate_path', 'project_name', 'confidence', 'reviewer', 'evidence']), async (args) => {
+    const target = (await app.sessions.listTargets()).find((item) => item.pid === num(args, 'pid'));
+    if (!target || !target.version) throw new WxmpError('TARGET_NOT_FOUND', 'Target not found');
+    const manager = app.sessions.profileManager();
+    const loaded = await manager.load(target.version, text(args, 'candidate_path'));
+    const probe = await manager.probe(target, loaded.profile);
+    if (probe.hashValidated !== true || probe.valid !== true) {
+      throw new WxmpError('PROFILE_REVIEW_FAILED', 'Candidate must match the target module hash and pass offset bounds before promotion', probe);
+    }
+    const confidence = text(args, 'confidence') as 'medium' | 'high';
+    if (!['medium', 'high'].includes(confidence)) throw new WxmpError('INVALID_ARGUMENT', 'confidence must be medium or high');
+    const reviewEvidence = stringArray(args, 'evidence').map((item) => item.trim()).filter(Boolean);
+    if (reviewEvidence.length === 0) throw new WxmpError('INVALID_ARGUMENT', 'evidence must contain at least one review reference');
+    const profile = manager.promote(loaded.profile, {
+      confidence,
+      reviewer: text(args, 'reviewer'),
+      evidence: [...reviewEvidence, `module-sha256:${String(probe.sha256)}`],
+      note: optionalText(args, 'note'),
+    });
+    const project = safeProjectName(text(args, 'project_name'));
+    const dir = resolveInside(app.config.workspaceRoot, project, 'wechat-miniapp', 'profiles');
+    await fs.mkdir(dir, { recursive: true });
+    const outputPath = resolveInside(dir, `windows-${profile.wmpfVersion}-reviewed-${Date.now()}.json`);
+    await fs.writeFile(outputPath, `${JSON.stringify(profile, null, 2)}\n`, 'utf8');
+    return result({ profile, outputPath, probe });
+  }));
 
   tools.push(entry('wxmp_export_evidence', 'Export evidence manifest plus report/findings/triage artifacts for one session.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => { const session = app.sessions.get(text(args, 'session_id')); const paths = await session.evidence.exportBundle(app.sessions.publicStatus(session), session.findings); return result(paths); }));
 

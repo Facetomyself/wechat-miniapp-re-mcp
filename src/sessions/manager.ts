@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { AppConfig } from '../config.js';
 import { EvidenceStore } from '../evidence/store.js';
 import { WxmpError } from '../errors.js';
@@ -8,7 +9,7 @@ import { discoverTargets, resolveTarget } from '../runtime/target-discovery.js';
 import { CdpChannel } from '../transport/cdp-channel.js';
 import { DevToolsProxy } from '../transport/devtools-proxy.js';
 import { WmpfBridgeServer } from '../transport/bridge-server.js';
-import { OffsetProfile, RuntimeCapabilities, SessionState, TargetProcess, WmpfContext } from '../types.js';
+import { EvidenceFinding, OffsetProfile, RuntimeCapabilities, SessionState, TargetProcess, WmpfContext } from '../types.js';
 
 export interface WxmpSession {
   id: string;
@@ -25,7 +26,7 @@ export interface WxmpSession {
   evidence: EvidenceStore;
   channel: CdpChannel;
   frida: FridaHandle | null;
-  findings: Array<Record<string, unknown>>;
+  findings: EvidenceFinding[];
 }
 
 export interface AttachOptions {
@@ -67,14 +68,16 @@ export class SessionManager {
     if (existing) throw new WxmpError('TARGET_ALREADY_ATTACHED', `WMPF process ${target.pid} already belongs to session ${existing.id}`);
 
     const id = `wxmp-${randomUUID()}`;
-    const evidence = new EvidenceStore(this.config.workspaceRoot, options.projectName, id);
+    const evidence = new EvidenceStore(this.config.workspaceRoot, options.projectName, id, this.config.eventLimit);
     await evidence.init();
     const loaded = await this.profiles.load(target.version, options.profilePath);
+    this.profiles.assertInjectable(loaded.profile);
     const probe = await this.profiles.probe(target, loaded.profile);
+    if (probe.hashMatches === false) throw new WxmpError('PROFILE_HASH_MISMATCH', 'Profile module hash does not match the target module', probe);
     if (!probe.valid) throw new WxmpError('PROFILE_OUT_OF_BOUNDS', 'Profile offsets are outside the target module', probe);
 
     const channel = new CdpChannel(id, evidence, (payload, contextId) => this.bridge.sendCdp(id, payload, contextId));
-    const cdpContextUnsub = channel.onContext((action, value) => this.handleCdpContext(id, action, value));
+    channel.onContext((action, value) => this.handleCdpContext(id, action, value));
     const now = new Date().toISOString();
     const session: WxmpSession = {
       id,
@@ -94,7 +97,7 @@ export class SessionManager {
         debugger: false,
         network: false,
         wxTrace: false,
-        staticAdapter: Boolean(this.config.gwxapkgPath),
+        staticAdapter: Boolean(this.config.gwxapkgPath && existsSync(this.config.gwxapkgPath)),
         minigameDynamic: 'unknown',
       },
       evidence,
@@ -104,6 +107,15 @@ export class SessionManager {
     };
     this.sessions.set(id, session);
     await evidence.append('session.created', { target, profilePath: loaded.path, probe });
+    if (probe.hashValidated !== true) {
+      this.upsertFinding(session, {
+        id: 'profile-hash-unbound',
+        title: 'Runtime profile is not bound to a verified module hash',
+        severity: 'medium',
+        summary: 'The external compatibility profile passed offset bounds but does not carry an expected module SHA-256.',
+        evidenceTypes: ['session.created'],
+      });
+    }
 
     try {
       this.updateState(session, 'attaching');
@@ -117,12 +129,28 @@ export class SessionManager {
       this.updateState(session, 'waiting_for_runtime');
       const connected = await this.bridge.waitForConnection(id, options.connectTimeoutMs ?? 3000);
       if (connected && session.state !== 'connected') this.handleConnected(id);
+      if (!connected) {
+        this.upsertFinding(session, {
+          id: 'runtime-not-ready',
+          title: 'WMPF runtime did not connect within the attach window',
+          severity: 'high',
+          summary: 'Frida attach completed, but the WMPF debug WebSocket did not enter the bridge during the configured timeout.',
+          evidenceTypes: ['session.attach_result'],
+        });
+      }
       await evidence.append('session.attach_result', { connected, state: session.state });
       return session;
     } catch (error) {
       this.updateState(session, 'failed');
       await evidence.append('session.attach_failed', {
         message: error instanceof Error ? error.message : String(error),
+      });
+      this.upsertFinding(session, {
+        id: 'attach-failed',
+        title: 'Runtime attach failed',
+        severity: 'high',
+        summary: error instanceof Error ? error.message : String(error),
+        evidenceTypes: ['session.attach_failed'],
       });
       await session.frida?.detach().catch(() => undefined);
       session.frida = null;
@@ -166,14 +194,37 @@ export class SessionManager {
     await session.frida?.detach().catch(() => undefined);
     session.frida = null;
     session.capabilities.frida = false;
+    session.capabilities.bridge = false;
     session.capabilities.cdp = false;
+    session.capabilities.debugger = false;
+    session.capabilities.network = false;
+    session.capabilities.wxTrace = false;
     this.updateState(session, 'closed');
     await session.evidence.append('session.detached', {});
+  }
+
+  async waitForRuntime(sessionId: string, timeoutMs: number): Promise<Record<string, unknown>> {
+    const session = this.get(sessionId);
+    if (['closed', 'detaching', 'failed'].includes(session.state)) {
+      throw new WxmpError('SESSION_NOT_WAITABLE', `Session ${sessionId} is in state ${session.state}`, { sessionId, state: session.state });
+    }
+    const connected = await this.bridge.waitForConnection(sessionId, timeoutMs);
+    if (connected && session.state !== 'connected') this.handleConnected(sessionId);
+    if (!connected) this.upsertFinding(session, {
+      id: 'runtime-not-ready',
+      title: 'WMPF runtime did not reconnect within the wait window',
+      severity: 'high',
+      summary: 'The session remains attached and reserved; retry after a mini-program foreground/reload transition.',
+      evidenceTypes: ['runtime.wait_result'],
+    });
+    await session.evidence.append('runtime.wait_result', { connected, timeoutMs, state: session.state });
+    return { connected, ...this.publicStatus(session) };
   }
 
   async startProxy(sessionId: string, port: number): Promise<Record<string, unknown>> {
     const session = this.get(sessionId);
     if (!this.bridge.isConnected(sessionId)) throw new WxmpError('RUNTIME_NOT_CONNECTED', 'Cannot start DevTools proxy before WMPF connects');
+    if (this.proxies.has(sessionId)) throw new WxmpError('DEVTOOLS_PROXY_RUNNING', 'This session already has a DevTools proxy');
     const proxy = new DevToolsProxy();
     const result = await proxy.start(session.channel, port);
     this.proxies.set(sessionId, proxy);
@@ -232,6 +283,8 @@ export class SessionManager {
     session.capabilities.network = true;
     session.capabilities.wxTrace = true;
     this.updateState(session, 'connected');
+    this.resolveFinding(session, 'runtime-not-ready');
+    this.resolveFinding(session, 'runtime-disconnected');
     void session.evidence.append('runtime.connected', {});
     void session.channel.send('Runtime.enable').catch(() => undefined);
     void session.channel.send('Debugger.enable').catch(() => undefined);
@@ -243,8 +296,16 @@ export class SessionManager {
     session.capabilities.cdp = false;
     session.capabilities.debugger = false;
     session.capabilities.network = false;
+    session.capabilities.wxTrace = false;
     this.updateState(session, 'disconnected');
-    session.channel.close('WMPF runtime disconnected');
+    session.channel.disconnect('WMPF runtime disconnected');
+    this.upsertFinding(session, {
+      id: 'runtime-disconnected',
+      title: 'WMPF runtime channel disconnected',
+      severity: 'high',
+      summary: 'The bridge retained the MCP session and is waiting for the WMPF runtime to reconnect.',
+      evidenceTypes: ['runtime.disconnected'],
+    });
     void session.evidence.append('runtime.disconnected', {});
   }
 
@@ -268,6 +329,13 @@ export class SessionManager {
     session.contexts.set(value.id, context);
     if (!session.selectedContextId) session.selectedContextId = value.id;
     if (context.kind === 'minigame') session.capabilities.minigameDynamic = 'partial';
+    if (context.kind === 'minigame') this.upsertFinding(session, {
+      id: 'minigame-dynamic-partial',
+      title: 'Mini-game dynamic capability is partial',
+      severity: 'medium',
+      summary: 'The runtime context was classified as a mini-game; evaluate/network are available while debugger and wx tracing require capability validation.',
+      evidenceTypes: ['context.added'],
+    });
     void session.evidence.append('context.added', context, { contextId: value.id });
   }
 
@@ -293,11 +361,40 @@ export class SessionManager {
     session.contexts.set(value.id, context);
     if (!session.selectedContextId) session.selectedContextId = value.id;
     if (kind === 'minigame') session.capabilities.minigameDynamic = 'partial';
+    if (kind === 'minigame') this.upsertFinding(session, {
+      id: 'minigame-dynamic-partial',
+      title: 'Mini-game dynamic capability is partial',
+      severity: 'medium',
+      summary: 'The runtime context was classified as a mini-game; evaluate/network are available while debugger and wx tracing require capability validation.',
+      evidenceTypes: ['context.added'],
+    });
     void session.evidence.append('context.added', context, { contextId: value.id });
   }
 
   private updateState(session: WxmpSession, state: SessionState): void {
     session.state = state;
     session.updatedAt = new Date().toISOString();
+  }
+
+  private upsertFinding(session: WxmpSession, input: Pick<EvidenceFinding, 'id' | 'title' | 'severity' | 'summary' | 'evidenceTypes'>): void {
+    const now = new Date().toISOString();
+    const existing = session.findings.find((finding) => finding.id === input.id);
+    if (existing) {
+      existing.title = input.title;
+      existing.severity = input.severity;
+      existing.status = 'open';
+      existing.summary = input.summary;
+      existing.evidenceTypes = [...new Set([...existing.evidenceTypes, ...input.evidenceTypes])];
+      existing.lastObservedAt = now;
+      return;
+    }
+    session.findings.push({ ...input, status: 'open', firstObservedAt: now, lastObservedAt: now });
+  }
+
+  private resolveFinding(session: WxmpSession, id: string): void {
+    const finding = session.findings.find((entry) => entry.id === id);
+    if (!finding) return;
+    finding.status = 'resolved';
+    finding.lastObservedAt = new Date().toISOString();
   }
 }

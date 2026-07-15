@@ -14,6 +14,7 @@ export class WmpfBridgeServer {
   private server: WebSocketServer | null = null;
   private startPromise: Promise<void> | null = null;
   private pendingSessions: string[] = [];
+  private desiredSessionId: string | null = null;
   private sockets = new Map<string, WebSocket>();
   private sequence = new Map<string, number>();
   private connectionWaiters = new Map<string, Array<(connected: boolean) => void>>();
@@ -47,6 +48,14 @@ export class WmpfBridgeServer {
   }
 
   prepare(sessionId: string): void {
+    if (this.desiredSessionId && this.desiredSessionId !== sessionId) {
+      throw new WxmpError('BRIDGE_SESSION_BUSY', `WMPF bridge is already reserved by ${this.desiredSessionId}`, {
+        activeSessionId: this.desiredSessionId,
+        requestedSessionId: sessionId,
+        reason: 'The WMPF debug endpoint has no session handshake, so concurrent runtime attaches cannot be isolated safely.',
+      });
+    }
+    this.desiredSessionId = sessionId;
     if (!this.pendingSessions.includes(sessionId) && !this.sockets.has(sessionId)) this.pendingSessions.push(sessionId);
   }
 
@@ -84,6 +93,9 @@ export class WmpfBridgeServer {
     socket.on('close', () => {
       if (this.sockets.get(sessionId) === socket) {
         this.sockets.delete(sessionId);
+        if (this.desiredSessionId === sessionId && !this.pendingSessions.includes(sessionId)) {
+          this.pendingSessions.push(sessionId);
+        }
         this.hooks.onDisconnected(sessionId);
       }
     });
@@ -125,6 +137,7 @@ export class WmpfBridgeServer {
   }
 
   release(sessionId: string): void {
+    if (this.desiredSessionId === sessionId) this.desiredSessionId = null;
     this.pendingSessions = this.pendingSessions.filter((entry) => entry !== sessionId);
     const socket = this.sockets.get(sessionId);
     if (socket) socket.close(1000, 'Session detached');
@@ -135,6 +148,7 @@ export class WmpfBridgeServer {
   }
 
   async stop(): Promise<void> {
+    if (this.desiredSessionId) this.release(this.desiredSessionId);
     for (const sessionId of [...this.sockets.keys()]) this.release(sessionId);
     if (!this.server) return;
     const server = this.server;
@@ -148,6 +162,7 @@ export class WmpfBridgeServer {
       host: this.host,
       port: this.port,
       listening: Boolean(this.server),
+      desiredSessionId: this.desiredSessionId,
       connectedSessions: [...this.sockets.keys()],
       pendingSessions: [...this.pendingSessions],
     };
