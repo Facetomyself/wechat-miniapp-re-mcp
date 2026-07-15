@@ -4,9 +4,9 @@ Last updated: 2026-07-15
 
 Current working state:
 
-- Child branch: `fix/wx-frame-runtime`
+- Child branch: `main`
 - Package version: `0.3.1`
-- v0.3.0 remediation is delivered through PR #6; v0.3.1 closes the repeatable WMPF v19977 semantic gate locally and is pending Git delivery.
+- v0.3.0 remediation is delivered through PR #6; v0.3.1 closes the repeatable WMPF v19977 semantic gate and is delivered through PR #7. Parent gitlink/document synchronization is tracked by `reverse_ENV` PR #3.
 - Overall implementation completion: about 96%.
 - Original acceptance completion: about 92%.
 
@@ -45,8 +45,8 @@ The project is not marked 100% complete. Transport connectivity, tool invocation
 | 2. Dynamic reverse workflow | v19977 acceptance complete | 98% | AppService selection, evaluate, bound breakpoint, trace/hook events, inventory, Network body, replay, reconnect, detach, evidence export | Repeat the same gate on a second WMPF version |
 | 3. Static reverse workflow | Implementation complete | 95% | main/plugin/subpackage/minigame fixtures previously decompiled/indexed; path/no-output guards covered | Add reproducible real Gwxapkg subprocess fixture to CI |
 | 4. Profile lifecycle | Gated | 90% | canonical v19977 reviewed profile, module SHA-256 gate, candidate promotion, default AOB database wiring | Validate clean-room AOB/profile on a second real WMPF version |
-| 5. Parent integration | Pending refresh | 90% | existing on-demand config and Gwxapkg integration remain compatible | Update the parent gitlink after v0.3.1 merges |
-| 6. Git delivery | In progress | 90% | PR #6 carries v0.3.0; v0.3.1 has local automated and live evidence | Merge the v0.3.1 child change and refresh the parent gitlink |
+| 5. Parent integration | Delivered | 100% | `reverse_ENV` PR #3 updates the gitlink and integration documentation for v0.3.1 | — |
+| 6. Git delivery | Complete | 100% | PR #6 carries v0.3.0; PR #7 carries v0.3.1 with automated and live evidence; parent delivery is tracked by `reverse_ENV` PR #3 | — |
 
 ## Automated verification
 
@@ -76,8 +76,7 @@ The remaining real-target gap is a second WMPF module/version for cross-version 
 
 1. Obtain a second WMPF binary and validate AOB uniqueness, hash binding, attach, and detach.
 2. Add a small distributable static fixture or controlled backend stub for CI subprocess verification.
-3. Merge v0.3.1, then update the parent submodule gitlink and integration docs.
-4. Keep the mini-program selector available before attach; the WMPF debug filter remains lifecycle-triggered.
+3. Keep the mini-program selector available before attach; the WMPF debug filter remains lifecycle-triggered.
 
 ## Update rule
 
