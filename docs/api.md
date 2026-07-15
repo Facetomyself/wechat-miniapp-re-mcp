@@ -82,7 +82,7 @@ Breakpoint-by-URL results expose `boundLocations` and `pending`. An empty locati
 
 Generated profiles include the target module SHA-256, have candidate confidence, and are rejected by `wxmp_attach` until `wxmp_profile_promote` records a reviewer, timestamp, evidence references, and a `medium`/`high` promotion decision. Explicit profiles must match the target WMPF version. Clean-room/generated profiles must bind to `moduleSha256` and carry a promoted review decision before injection; external legacy profiles remain compatibility inputs and are reported as hash-unbound findings.
 
-The bundled `data/profiles/clean-room/windows-19977.json` profile is discovered automatically. `wxmp_profile_generate` accepts explicit signatures or loads a version-verified pair from the configured AOB signature database when `signatures` is omitted.
+The bundled `data/profiles/clean-room/windows-19977.json` and `windows-20079.json` profiles are discovered automatically. `wxmp_profile_generate` accepts explicit signatures or loads a version-verified pair from the configured AOB signature database when `signatures` is omitted. The bundled pair matched exactly once on both reviewed modules and preserves the candidate-review/hash-binding gate. WMPF 20079 verification covers profile generation, bounds/hash validation, production hook attachment, ready, and detach; it does not imply that the full AppService/CDP/Network/trace semantic gate has run on that version.
 
 ## Evidence
 

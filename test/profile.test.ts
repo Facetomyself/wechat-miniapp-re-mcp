@@ -54,11 +54,73 @@ test('profile manager loads verified signatures from the configured database', a
   await fs.rm(root, { recursive: true, force: true });
 });
 
-test('bundled reviewed profile uses the canonical filename expected by the loader', async () => {
+test('bundled signature database serves the reviewed cross-version patterns', async () => {
+  const databasePath = path.resolve('data', 'profiles', 'aob-signatures.json');
+  const manager = new ProfileManager([], [], [databasePath]);
+  const expected = [
+    {
+      name: 'cdpFilter',
+      pattern: '85 C9 79 05 4B 8B 44 25 08 4C 8B 6C 24 30 48 85',
+      adjustment: 32,
+    },
+    {
+      name: 'loadStart',
+      pattern: '89 02 48 C7 42 08 66 00 00 00 48 8D 5C 24 30 48 89 D9 E8 ?? ?? ?? FF 48 8B 13 4C 8B 43 08 48 89',
+      adjustment: 0,
+    },
+  ];
+
+  assert.deepEqual(await manager.signaturesForVersion(19977), expected);
+  assert.deepEqual(await manager.signaturesForVersion(20079), expected);
+
+  const database = JSON.parse(await fs.readFile(databasePath, 'utf8')) as {
+    verification: { verifiedVersions: number[] };
+    versionProfiles: Array<{ wmpfVersion: number; moduleSha256: string; reviewedProfile: string }>;
+  };
+  assert.deepEqual(database.verification.verifiedVersions, [19977, 20079]);
+  assert.deepEqual(database.versionProfiles.map(({ wmpfVersion, moduleSha256, reviewedProfile }) => ({
+    wmpfVersion,
+    moduleSha256,
+    reviewedProfile,
+  })), [
+    {
+      wmpfVersion: 19977,
+      moduleSha256: 'f569e0ddcd622e85fb33a0e2a4c647561fd27440c9612a54140572a42c8cfc7d',
+      reviewedProfile: 'data/profiles/clean-room/windows-19977.json',
+    },
+    {
+      wmpfVersion: 20079,
+      moduleSha256: 'b28ec2d547e8771aeebe94ba77bc618941c0ce0794ef443f905666f0668f5d2b',
+      reviewedProfile: 'data/profiles/clean-room/windows-20079.json',
+    },
+  ]);
+});
+
+test('cross-version loadStart signature wildcards the relocated call displacement', () => {
+  const pattern = '89 02 48 C7 42 08 66 00 00 00 48 8D 5C 24 30 48 89 D9 E8 ?? ?? ?? FF 48 8B 13 4C 8B 43 08 48 89';
+  const modules = [
+    Buffer.from('890248c7420866000000488d5c24304889d9e8698ec8ff488b134c8b43084889', 'hex'),
+    Buffer.from('890248c7420866000000488d5c24304889d9e879b2c7ff488b134c8b43084889', 'hex'),
+  ];
+
+  assert.notEqual(modules[0].subarray(19, 22).toString('hex'), modules[1].subarray(19, 22).toString('hex'));
+  for (const module of modules) assert.deepEqual(findPattern(module, pattern), [0]);
+});
+
+test('bundled reviewed profiles use canonical filenames and remain injectable', async () => {
   const profileDir = path.resolve('data', 'profiles', 'clean-room');
-  const loaded = await new ProfileManager([profileDir], []).load(19977);
-  assert.equal(loaded.profile.provenance.confidence, 'high');
-  assert.equal(path.basename(loaded.path), 'windows-19977.json');
+  const manager = new ProfileManager([profileDir], []);
+  const expected = new Map([
+    [19977, 'f569e0ddcd622e85fb33a0e2a4c647561fd27440c9612a54140572a42c8cfc7d'],
+    [20079, 'b28ec2d547e8771aeebe94ba77bc618941c0ce0794ef443f905666f0668f5d2b'],
+  ]);
+  for (const [version, moduleSha256] of expected) {
+    const loaded = await manager.load(version);
+    assert.equal(loaded.profile.provenance.confidence, 'high');
+    assert.equal(loaded.profile.moduleSha256, moduleSha256);
+    assert.equal(path.basename(loaded.path), `windows-${version}.json`);
+    assert.doesNotThrow(() => manager.assertInjectable(loaded.profile));
+  }
 });
 
 test('generated profiles bind candidates to the module SHA-256', async () => {

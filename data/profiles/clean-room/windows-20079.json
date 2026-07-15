@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows",
+  "wmpfVersion": 20079,
+  "moduleName": "flue.dll",
+  "moduleSha256": "b28ec2d547e8771aeebe94ba77bc618941c0ce0794ef443f905666f0668f5d2b",
+  "cdpFilterOffset": "0x30CF310",
+  "loadStartOffset": "0x25DFB90",
+  "sceneOffsets": [
+    64,
+    1480,
+    8,
+    1416,
+    16,
+    456
+  ],
+  "sceneWhitelist": [
+    1005,
+    1007,
+    1008,
+    1012,
+    1027,
+    1035,
+    1053,
+    1074,
+    1145,
+    1168,
+    1178,
+    1256,
+    1260,
+    1302,
+    1308
+  ],
+  "provenance": {
+    "source": "generated",
+    "confidence": "high",
+    "note": "Clean-room profile generated from official WMPF 20079; cross-version AOB uniqueness, SHA-256 binding, production hook attachment, and explicit detach were verified. Full mini-program semantic gates remain unverified on this version."
+  },
+  "review": {
+    "reviewer": "codex",
+    "reviewedAt": "2026-07-15T12:44:09.202Z",
+    "evidence": [
+      "Official Tencent Windows update catalog: RadiumWMPF 2.4.4.56 x64 universal V20079",
+      "Package MD5 ae9fde9752a3484fc91e0e451be60392 and SHA-256 f8dbe2277c9f9ce2f0a5eb4287976963050d080ff85c50ee80191c339f40425e",
+      "Independent offset candidate: WMPFDebugger commit 5e4695e9f1e2fa3866bb8c93e631449c4164cdc4",
+      "Cross-version scan: cdpFilter and loadStart each matched exactly once on reviewed WMPF 19977 and 20079 modules",
+      "Static probe: module SHA-256 matched and both hook offsets were within file bounds",
+      "Production FridaRuntimeAdapter emitted module, cdp_filter_attached, load_start_attached, and ready before explicit detach",
+      "module-sha256:b28ec2d547e8771aeebe94ba77bc618941c0ce0794ef443f905666f0668f5d2b"
+    ],
+    "decision": "promoted",
+    "note": "Promoted for profile-driven hook installation only; WMPF 20079 AppService, CDP, Network, trace, request-hook, replay, and reconnect semantics remain separate acceptance gates."
+  }
+}
