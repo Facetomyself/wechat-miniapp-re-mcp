@@ -37,6 +37,10 @@ export class EvidenceStore {
     return this.queue;
   }
 
+  async flush(): Promise<void> {
+    await this.queue;
+  }
+
   async writeJson(name: string, data: unknown): Promise<string> {
     const target = resolveInside(this.sessionRoot, 'artifacts', name);
     await fs.mkdir(path.dirname(target), { recursive: true });
