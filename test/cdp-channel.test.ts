@@ -6,6 +6,11 @@ import path from 'node:path';
 import { CdpChannel } from '../src/transport/cdp-channel.js';
 import { EvidenceStore } from '../src/evidence/store.js';
 
+async function cleanupEvidence(root: string, evidence: EvidenceStore): Promise<void> {
+  await evidence.flush();
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
 test('CDP command/response pairing resolves correctly', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
   const evidence = new EvidenceStore(root, 'fixture', 'session-1');
@@ -26,7 +31,7 @@ test('CDP command/response pairing resolves correctly', async () => {
   const result = await resultPromise;
   assert.deepEqual(result, { id: 1001, result: { value: 2 } });
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP timeout rejects when no response arrives', async () => {
@@ -38,7 +43,7 @@ test('CDP timeout rejects when no response arrives', async () => {
   const promise = channel.send('Debugger.stepOver', {}, '', 200);
   await assert.rejects(promise, (error: unknown) => error instanceof Error && error.message.includes('timed out'));
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP channel indexes scriptParsed and network events', async () => {
@@ -67,7 +72,7 @@ test('CDP channel indexes scriptParsed and network events', async () => {
   }), 'ctx-1');
   assert.equal(channel.requests.get('r1')?.response?.status, 200);
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP channel tracks paused state', async () => {
@@ -87,7 +92,7 @@ test('CDP channel tracks paused state', async () => {
   channel.handlePayload(JSON.stringify({ method: 'Debugger.resumed', params: {} }), 'ctx-1');
   assert.equal(channel.lastPaused, null);
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP channel extracts trace events from console API calls', async () => {
@@ -105,7 +110,7 @@ test('CDP channel extracts trace events from console API calls', async () => {
   assert.equal(events.total, 1);
   assert.deepEqual(events.items[0].data, { kind: 'wx', name: 'request', phase: 'call', payload: [{}] });
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP channel close rejects pending commands', async () => {
@@ -121,7 +126,7 @@ test('CDP channel close rejects pending commands', async () => {
   channel.close('test reason');
   await assert.rejects(promise, (error: unknown) => error instanceof Error && error.message.includes('test reason'));
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP disconnect resets runtime state but preserves context listeners for reconnect', async () => {
@@ -157,7 +162,7 @@ test('CDP disconnect resets runtime state but preserves context listeners for re
   }), 'ctx-2');
   assert.deepEqual(actions, ['add:1', 'remove:1', 'add:2']);
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP channel onRaw forwards events to listeners', async () => {
@@ -175,7 +180,7 @@ test('CDP channel onRaw forwards events to listeners', async () => {
   channel.handlePayload(JSON.stringify({ method: 'Runtime.executionContextDestroyed', params: {} }), 'ctx-1');
   assert.equal(rawPayloads.length, 1);
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP channel tracks execution context creation and destruction', async () => {
@@ -205,7 +210,7 @@ test('CDP channel tracks execution context creation and destruction', async () =
   }), 'ctx-1');
   assert.equal(channel.contexts.size, 0);
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });
 
 test('CDP channel detects minigame context kind', async () => {
@@ -223,5 +228,5 @@ test('CDP channel detects minigame context kind', async () => {
   }), 'ctx-1');
   assert.equal(kinds[0], 'minigame');
 
-  await fs.rm(root, { recursive: true, force: true });
+  await cleanupEvidence(root, evidence);
 });

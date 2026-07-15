@@ -9,7 +9,8 @@ test('evidence store writes NDJSON and three-piece artifacts', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-evidence-'));
   const store = new EvidenceStore(root, 'fixture', 'session-1');
   await store.init();
-  await store.append('test.event', { token: 'secret', value: 1 });
+  void store.append('test.event', { token: 'secret', value: 1 });
+  await store.flush();
   const events = await store.readEvents();
   assert.equal(events.total, 1);
   assert.deepEqual(events.items[0].data, { token: '[redacted]', value: 1 });
