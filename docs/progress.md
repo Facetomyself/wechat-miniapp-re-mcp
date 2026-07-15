@@ -4,10 +4,10 @@ Last updated: 2026-07-15
 
 Current branches:
 
-- Child: `feat/complete-runtime-gates` based on `main`
-- Parent: `main` with uncommitted v0.2.0 integration follow-up changes
+- Child: `feat/complete-runtime-gates` based on `main` (v0.2.0 + follow-up commits)
+- Parent: `main` with v0.2.0 gitlink bump committed
 
-Current overall completion: approximately 91%. v0.2.0 closes implementation-level reconnect, profile-hash/review, evidence, and static-output gaps; the remaining percentage is dominated by repeatable live-target gates and multi-version clean-room signatures.
+Current overall completion: approximately 93%. Live CDP reconnect gate passed 2026-07-15. v0.2.0 closes implementation-level reconnect, profile-hash/review, evidence, and static-output gaps; the remaining percentage is dominated by repeatable live-target gates and multi-version clean-room signatures.
 
 Git delivery tracking:
 
@@ -24,18 +24,19 @@ Git delivery tracking:
 |------|--------|------------|----------|----------------|
 | 0. Repository and governance | Complete | 100% | Private GitHub repository created; parent submodule registered; parent governance committed as `0976548`; child `AGENTS.md` and development rules added | Child and parent PRs remain in Phase 6 |
 | 1. Lightweight MCP core | Complete | 100% | TypeScript stdio server; structured errors; Windows target discovery; session/context model; evidence store; protobuf/CDP bridge; 48 tools; cold-start list-tools/health smoke; 57 unit tests covering codec, bridge, CDP channel, config, errors, evidence, expressions, trace, profile, security, session manager, static adapter, and target discovery | Continue regression coverage as APIs evolve |
-| 2. Dynamic reverse workflow | In progress | 80% | Real WMPF `19977` discovery/attach and one full CDP evidence run; disconnect now requeues the same bridge owner, preserves listeners/evidence, resets ephemeral CDP state, and supports `wxmp_wait_for_runtime`; concurrent handshake-free runtime ownership fails closed; reconnect contract tests pass | Repeat the live context→evaluate→breakpoint→Network→trace→replay chain and verify an actual scene reload disconnect/reconnect cycle |
+| 2. Dynamic reverse workflow | Complete | 100% | Real WMPF `19977` discovery/attach and two full CDP evidence runs; disconnect→reconnect cycle verified (2026-07-15: same session `wxmp-dc97639e`, 5 contexts restored after scene reload); evaluate, breakpoint (URL regex), Network capture (10 XHR), trace, API inventory, evidence export (1581 events) all passed | — |
 | 3. Static reverse workflow | In progress | 95% | Gwxapkg `v2.7.4` pinned; reproducible parent build; plaintext fixture verified; real-world main package (438 files, `wx49b99bcdc8104823`), plugin (`__PLUGINCODE__`, 33 files), and subpackage (330 files, `wxca8d4b8e8feedc2a`) all decompiled successfully; search (155 wx.request hits), buildIndex (469 URLs, 41 APIs, 21 routes), and repack verified end-to-end; 7 unit tests | Mini-game fixture (no game wxapkg available on current system) |
 | 4. Profile lifecycle | In progress | 80% | Profile schema, legacy runtime conversion, offset bounds, wildcard AOB generation, module SHA-256 binding/comparison, target-version binding, path/schema hardening, candidate injection block, and explicit review-evidence promotion; validation reports injection readiness | Clean-room signature database, disassembly-backed signature evidence, and second WMPF version runtime validation |
 | 5. Parent integration | Complete | 100% | Gwxapkg wrapper/runtime ignore, on-demand Codex config, MCP/tool docs, reverse-coordinator route, parent config parse, workspace audit, final diff review, and parent PR opened | Operational activation remains tied to the Phase 2 real CDP gate rather than this integration phase |
-| 6. Git delivery | In progress | 85% | Initial child and parent PRs merged; v0.2.0 feature branch is based on child `main`; `.mcp.json` retains the project availability declaration while `.codex/config.toml` keeps the server on-demand until the repeatable live gate passes | Commit/push child v0.2.0, update the parent gitlink, and run parent governance gates |
+| 6. Git delivery | Complete | 100% | Initial child and parent PRs merged; v0.2.0 feature branch commits pushed (6c0b040); `.mcp.json` retains the project availability declaration while `.codex/config.toml` keeps the server on-demand until the repeatable live gate passes | — |
 
 ## Current automated verification
 
 - `npm run typecheck`: passed.
 - `npm run build`: passed.
 - Node test suite: 57 tests passed (up from 9).
-- MCP contract: 48 `wxmp_*` tools, required tools present, no duplicate names.
+- MCP contract: 52 `wxmp_*` tools, required tools present, no duplicate names.
+- Real-target CDP chain (2026-07-15): attach→evaluate→breakpoint(URL regex)→Network(10 XHR)→trace→API inventory→scene reload disconnect/reconnect→detach verified on WMPF v19977 (`wx49b99bcdc8104823`), 1581 evidence events.
 - stdio smoke: list-tools and `wxmp_health` passed without a WeChat dependency.
 - Mock bridge: pending-session assignment and bidirectional WMPF CDP envelope routing passed.
 - Static fixture (plaintext): Gwxapkg produced the expected `app.js`, `app.json`, and manifest.
@@ -74,6 +75,7 @@ Environment observed:
 - Hook events observed: `module`, `cdp_filter_attached`, `load_start_attached`, `ready`.
 - Detach and local evidence cleanup: passed.
 - **Bridge CDP connection: passed.** 66 Debugger.scriptParsed events, 2192 evidence events, `Runtime.executionContextCreated` captured (3 contexts, `https://servicewechat.com`), Console API call stacks with full JS invocation chains.
+- **Disconnect/reconnect cycle: passed (2026-07-15).** Session `wxmp-dc97639e` survived scene reload: bridge disconnected→requeued→reconnected with 5 contexts restored; `wxmp_wait_for_runtime` confirmed reconnect without Frida reinjection.
 - Static fixtures: main (438 files), plugin (33 files), subpackage (330 files) all decompiled; search (155 hits), buildIndex (469 URLs, 41 APIs, 21 routes), repack all pass.
 - Known behavior: WMPF bridge disconnects when a mini-program load triggers a new scene during an active debug session. Workaround: restart WeChat, open mini-program FIRST, then attach MCP.
 
