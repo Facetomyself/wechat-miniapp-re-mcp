@@ -87,10 +87,11 @@ export class CdpChannel {
   }
 
   private trackEvent(method: string, params: Record<string, unknown>, contextId: string): void {
+    const eventContextId = contextId || undefined;
     if (method === 'Debugger.scriptParsed') {
       const script: ScriptRecord = {
         scriptId: String(params.scriptId ?? ''),
-        contextId,
+        contextId: eventContextId,
         url: String(params.url ?? ''),
         executionContextId: params.executionContextId === undefined ? undefined : Number(params.executionContextId),
         hash: params.hash === undefined ? undefined : String(params.hash),
@@ -108,7 +109,7 @@ export class CdpChannel {
       if (requestId) {
         this.requests.set(requestId, {
           requestId,
-          contextId,
+          contextId: eventContextId,
           url: String(request.url ?? ''),
           method: String(request.method ?? 'GET'),
           requestHeaders: normalizeHeaders(request.headers),

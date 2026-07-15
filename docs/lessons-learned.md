@@ -77,3 +77,11 @@ The bundled v19977 clean-room profile is loaded before external compatibility di
 - request-hook capability is tracked per context and requires an installed `wx.request`, `fetch`, or `XMLHttpRequest` wrapper.
 - breakpoint-by-URL with no locations is reported as pending.
 - runtime evaluation exception details are returned as structured tool errors instead of MCP success.
+
+## Nested `wx` Runtime Resolution in v0.3.1
+
+PC WMPF page contexts can expose the mini-program logic runtime through an accessible child frame instead of `globalThis.wx`. On v19977 the verified path was `globalThis.frames[1]`; First also uses `window.nav.wxFrame` for the same reason.
+
+The runtime resolver now checks the current global, `nav.wxFrame`, parent/top candidates, and bounded accessible child frames. Context probing, `wx.*` calls, cloud calls, trace injection, and request hooks all use the same resolver and report `wxRuntimePath` as evidence.
+
+Some WMPF `Debugger.scriptParsed` and Network events arrive with an empty `jscontextId`. These records remain explicitly unscoped, while source retrieval, breakpoints, response bodies, and replay fall back to the selected context instead of treating the empty string as a valid context.

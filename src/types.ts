@@ -24,7 +24,11 @@ export interface WmpfContext {
   envType?: string;
   href?: string;
   hasWx?: boolean;
+  hasWxRequest?: boolean;
   hasWxConfig?: boolean;
+  hasGetCurrentPages?: boolean;
+  wxRuntimePath?: string;
+  wxRuntimeHref?: string;
   probeConfidence: 'unprobed' | 'low' | 'medium' | 'high';
   probedAt?: string;
   connectedAt: string;

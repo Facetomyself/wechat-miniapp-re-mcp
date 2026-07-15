@@ -4,11 +4,11 @@ Last updated: 2026-07-15
 
 Current working state:
 
-- Child branch: `feat/complete-runtime-gates`
-- Package version: `0.3.0`
-- v0.3.0 remediation is delivered through PR #6 with green Node 20/22 CI; the parent gitlink update and repeatable live semantic gates remain pending.
-- Overall implementation completion: about 90%.
-- Original acceptance completion: about 84%.
+- Child branch: `fix/wx-frame-runtime`
+- Package version: `0.3.1`
+- v0.3.0 remediation is delivered through PR #6; v0.3.1 closes the repeatable WMPF v19977 semantic gate locally and is pending Git delivery.
+- Overall implementation completion: about 96%.
+- Original acceptance completion: about 92%.
 
 The project is not marked 100% complete. Transport connectivity, tool invocation, and semantic capability success are tracked separately.
 
@@ -28,55 +28,56 @@ The project is not marked 100% complete. Transport connectivity, tool invocation
 - Third-party copied WMPF profile data was removed from Git; external legacy profiles remain runtime-only fallback inputs.
 - CI now runs the complete gate on Node.js 20 and 22.
 
+## v0.3.1 live runtime closure
+
+- Context probing resolves `wx` from `globalThis`, `nav.wxFrame`, parent/top candidates, and bounded accessible child frames.
+- `wxmp_call_wx_api`, cloud calls, trace injection, and request hooks use the same runtime resolver and expose `wxRuntimePath`.
+- Empty WMPF event `contextId` values are normalized as unscoped; source, breakpoint, body, and replay operations fall back to the selected context.
+- The WMPF v19977 live semantic gate passed AppService selection, evaluate, a real breakpoint location, 727 trace wrappers, `wx.request`/fetch/XHR hook installation, fixture hook events, API inventory, Network body retrieval, replay, same-session restart/reconnect, detach, and evidence export.
+- Live summary: `workspace/live-verification/wechat-miniapp/live-semantic-gate-v030-1784105083771.json`; session evidence: `sessions/wxmp-56509ca4-9ad7-474c-bacd-cefde09ccc1f/` below that project root.
+
 ## Phase status
 
 | Phase | Status | Completion | Verified evidence | Remaining gate |
 |---|---|---:|---|---|
 | 0. Repository and governance | Complete | 100% | Child repository, submodule boundary, MIT license, ignore rules, clean-room/legacy separation | — |
 | 1. Lightweight MCP core | Implementation complete | 100% | stdio cold start, schema validation, structured errors, codec/bridge tests, reconnect ownership, evidence persistence | Official MCP conformance remains optional follow-up |
-| 2. Dynamic reverse workflow | Gated | 85% | v19977 bridge, evaluate, source enumeration, Network events, disconnect/reconnect observed; semantic guards implemented | Repeat live v0.3 gate for AppService selection, bound/hit breakpoint, non-zero trace/hook event, replay result, detach |
+| 2. Dynamic reverse workflow | v19977 acceptance complete | 98% | AppService selection, evaluate, bound breakpoint, trace/hook events, inventory, Network body, replay, reconnect, detach, evidence export | Repeat the same gate on a second WMPF version |
 | 3. Static reverse workflow | Implementation complete | 95% | main/plugin/subpackage/minigame fixtures previously decompiled/indexed; path/no-output guards covered | Add reproducible real Gwxapkg subprocess fixture to CI |
 | 4. Profile lifecycle | Gated | 90% | canonical v19977 reviewed profile, module SHA-256 gate, candidate promotion, default AOB database wiring | Validate clean-room AOB/profile on a second real WMPF version |
-| 5. Parent integration | Pending refresh | 90% | existing on-demand config and Gwxapkg integration remain compatible | Restart/re-enable parent MCP with v0.3.0 build and update parent docs/gitlink |
-| 6. Git delivery | Complete | 100% | PR #6 carries v0.3.0; Node 20 and Node 22 checks are green | — |
+| 5. Parent integration | Pending refresh | 90% | existing on-demand config and Gwxapkg integration remain compatible | Update the parent gitlink after v0.3.1 merges |
+| 6. Git delivery | In progress | 90% | PR #6 carries v0.3.0; v0.3.1 has local automated and live evidence | Merge the v0.3.1 child change and refresh the parent gitlink |
 
 ## Automated verification
 
 - TypeScript strict typecheck and build.
-- Node test suite: 73 passing tests covering bridge, codec, CDP state, context/request indexing, originating-context source/replay behavior, request hooks, proxy client ID/context isolation, evidence count/byte overflow and write recovery, profile gates, static guards, server schema validation, and target discovery.
+- Node test suite: 80 passing tests covering bridge, codec, CDP state, nested WMPF `wx` resolution, context/request indexing, originating/unscoped-context source and replay behavior, request hooks, proxy client ID/context isolation, evidence count/byte overflow and write recovery, profile gates, static guards, server schema validation, and target discovery.
 - MCP contract checks required tools, prefix, duplicates, and minimum inventory.
 - stdio smoke verifies initialize, list-tools, and `wxmp_health` without WeChat.
 - Production dependency audit reports no known vulnerabilities at the time of this update.
 
 ## Real-target evidence status
 
-Previously observed on WMPF v19977:
+Verified on WMPF v19977 by the v0.3.1 live semantic gate:
 
 - main-process discovery and Frida hook load;
 - WMPF protobuf/CDP bridge connection;
-- script enumeration and source retrieval;
-- `Runtime.evaluate` responses;
-- Network request/response events;
+- nested-frame AppService/`wx` discovery with `wxRuntimePath` evidence;
+- script enumeration, source retrieval, and a non-empty `Debugger.setBreakpoint` location;
+- 727 wrapped `wx.*` methods and recorded trace events;
+- installed `wx.request`, fetch, and XHR wrappers plus controlled fixture hook records;
+- Network request/response body retrieval and in-runtime replay;
 - same-session disconnect/requeue/reconnect;
 - evidence bundle export and detach.
 
-The previous evidence does not prove the following semantic gates:
-
-- a breakpoint bound to a non-empty location or produced `Debugger.paused`;
-- a trace wrapper count greater than zero and at least one `trace.event`;
-- an installed request hook captured a fixture request;
-- request replay returned and was recorded;
-- a second WMPF module matched the clean-room AOB signatures.
-
-v0.3.0 now reports these gaps instead of treating command responses as success. Completion increases only after new live evidence closes them.
+The remaining real-target gap is a second WMPF module/version for cross-version AOB, hash-binding, attach, and detach validation.
 
 ## Known limitations and next actions
 
-1. Restart the currently running stdio server so port `127.0.0.1:9421` uses the v0.3.0 build, then run the complete live semantic gate.
-2. Keep the mini-program foreground before attach; the WMPF debug filter remains lifecycle-triggered.
-3. Obtain a second WMPF binary and validate AOB uniqueness, hash binding, attach, and detach.
-4. Add a small distributable static fixture or controlled backend stub for CI subprocess verification.
-5. Update the parent submodule gitlink and integration docs to the merged v0.3.0 child commit.
+1. Obtain a second WMPF binary and validate AOB uniqueness, hash binding, attach, and detach.
+2. Add a small distributable static fixture or controlled backend stub for CI subprocess verification.
+3. Merge v0.3.1, then update the parent submodule gitlink and integration docs.
+4. Keep the mini-program selector available before attach; the WMPF debug filter remains lifecycle-triggered.
 
 ## Update rule
 

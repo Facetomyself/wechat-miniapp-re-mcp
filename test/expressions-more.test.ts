@@ -40,7 +40,7 @@ test('replay expression constructs fetch with correct method and headers', () =>
 
 test('wx API expression handles nested options', () => {
   const expression = buildWxApiExpression('login', { timeout: 5000, force: true });
-  assert.ok(expression.includes('globalThis.wx'));
+  assert.ok(expression.includes('__wxmpResolveRuntime'));
   assert.ok(expression.includes('"login"'));
   assert.ok(expression.includes('"timeout"'));
   assert.doesNotThrow(() => new Function(`return ${expression};`));

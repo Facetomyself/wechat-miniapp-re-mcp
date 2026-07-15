@@ -1,9 +1,14 @@
+import { WX_RUNTIME_RESOLVER_SOURCE } from './wx-runtime.js';
+
 export function buildWxRequestHookSource(): string {
   return `(() => {
   const root = globalThis;
   if (root.__wxmpRequestHook && root.__wxmpRequestHook.active) {
     return { ok: true, reused: true };
   }
+  ${WX_RUNTIME_RESOLVER_SOURCE}
+  const runtime = __wxmpResolveRuntime();
+  const wxObject = runtime.wx;
 
   const MAX_RECORDS = 200;
   const records = [];
@@ -48,10 +53,10 @@ export function buildWxRequestHookSource(): string {
   }
 
   // Hook wx.request
-  if (root.wx && typeof root.wx.request === 'function') {
-    const original = root.wx.request;
+  if (wxObject && typeof wxObject.request === 'function') {
+    const original = wxObject.request;
     if (!original.__wxmpHooked) {
-      root.wx.request = function (options) {
+      wxObject.request = function (options) {
         const input = options && typeof options === 'object' ? options : {};
         const req = {
           type: 'wx.request',
@@ -96,8 +101,8 @@ export function buildWxRequestHookSource(): string {
 
         return original.call(this, input);
       };
-      root.wx.request.__wxmpHooked = true;
-      originals.push({ object: root.wx, key: 'request', original: original });
+      wxObject.request.__wxmpHooked = true;
+      originals.push({ object: wxObject, key: 'request', original: original });
       installed.push('wx.request');
     }
   }
@@ -245,10 +250,11 @@ export function buildWxRequestHookSource(): string {
     installed: installed.slice(),
     wrapped: installed.length,
     capabilities: {
-      wx: typeof root.wx !== 'undefined',
+      wx: Boolean(wxObject),
       fetch: typeof root.fetch === 'function',
       xhr: typeof root.XMLHttpRequest === 'function'
-    }
+    },
+    wxRuntimePath: runtime.path
   };
 })()`;
 }

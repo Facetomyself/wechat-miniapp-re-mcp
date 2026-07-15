@@ -6,6 +6,7 @@ import { WxmpError } from '../errors.js';
 import { FridaHandle, FridaRuntimeAdapter } from '../runtime/frida-adapter.js';
 import { ProfileManager } from '../runtime/profile.js';
 import { discoverTargets, resolveTarget } from '../runtime/target-discovery.js';
+import { buildWxRuntimeProbeExpression } from '../runtime/wx-runtime.js';
 import { CdpChannel, extractRemoteValue } from '../transport/cdp-channel.js';
 import { DevToolsProxy } from '../transport/devtools-proxy.js';
 import { WmpfBridgeServer } from '../transport/bridge-server.js';
@@ -39,16 +40,7 @@ export interface AttachOptions {
   connectTimeoutMs?: number;
 }
 
-const CONTEXT_PROBE_EXPRESSION = `(() => {
-  const library = globalThis.__wxLibrary ?? {};
-  return {
-    hasWx: typeof globalThis.wx !== 'undefined',
-    hasWxConfig: typeof globalThis.__wxConfig !== 'undefined',
-    contextType: typeof library.contextType === 'string' ? library.contextType : '',
-    envType: typeof library.envType === 'string' ? library.envType : '',
-    href: globalThis.location?.href || ''
-  };
-})()`;
+const CONTEXT_PROBE_EXPRESSION = buildWxRuntimeProbeExpression();
 
 export class SessionManager {
   private readonly sessions = new Map<string, WxmpSession>();
@@ -564,7 +556,11 @@ export class SessionManager {
       if (!value || typeof value !== 'object') throw new WxmpError('CONTEXT_PROBE_EMPTY', 'Context probe returned no serializable value');
       const probe = value as Record<string, unknown>;
       context.hasWx = probe.hasWx === true;
+      context.hasWxRequest = probe.hasWxRequest === true;
       context.hasWxConfig = probe.hasWxConfig === true;
+      context.hasGetCurrentPages = probe.hasGetCurrentPages === true;
+      context.wxRuntimePath = typeof probe.wxRuntimePath === 'string' ? probe.wxRuntimePath : '';
+      context.wxRuntimeHref = typeof probe.wxRuntimeHref === 'string' ? probe.wxRuntimeHref : '';
       context.contextType = typeof probe.contextType === 'string' ? probe.contextType : '';
       context.envType = typeof probe.envType === 'string' ? probe.envType : '';
       context.href = typeof probe.href === 'string' ? probe.href : '';

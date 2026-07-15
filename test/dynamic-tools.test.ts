@@ -101,6 +101,58 @@ test('script source retrieval uses the context that originally reported the scri
   assert.deepEqual(sentContexts, ['ctx-origin']);
 });
 
+test('script source retrieval falls back to the selected context for unscoped WMPF events', async () => {
+  const sentContexts: string[] = [];
+  const session = {
+    channel: {
+      scripts: new Map([['script-1', { scriptId: 'script-1', contextId: '', url: 'app.js' }]]),
+      send: async (_method: string, _params: unknown, contextId: string) => {
+        sentContexts.push(contextId);
+        return { id: 1, result: { scriptSource: 'const fallback = true;' } };
+      },
+    },
+    evidence: { writeText: async () => 'artifact.js' },
+  };
+  const app = {
+    sessions: {
+      get: () => session,
+      contextId: () => 'ctx-selected',
+    },
+  } as unknown as WxmpApp;
+
+  const response = await tool(app, 'wxmp_get_source').handler({ session_id: 'session-1', script_id: 'script-1' });
+  const payload = JSON.parse((response.content[0] as { type: 'text'; text: string }).text) as { data: { contextId: string } };
+  assert.equal(payload.data.contextId, 'ctx-selected');
+  assert.deepEqual(sentContexts, ['ctx-selected']);
+});
+
+test('request replay falls back to the selected context for unscoped WMPF events', async () => {
+  const sentContexts: string[] = [];
+  const session = {
+    channel: {
+      requests: new Map([['request-1', {
+        requestId: 'request-1', contextId: '', url: 'https://api.example.test/items', method: 'GET', requestHeaders: {},
+      }]]),
+      send: async (_method: string, _params: unknown, contextId: string) => {
+        sentContexts.push(contextId);
+        return { id: 1, result: { result: { type: 'object', value: { status: 200, body: 'ok' } } } };
+      },
+    },
+    evidence: { append: async () => {}, writeText: async () => 'artifact.txt' },
+  };
+  const app = {
+    sessions: {
+      get: () => session,
+      contextId: () => 'ctx-selected',
+    },
+  } as unknown as WxmpApp;
+
+  const response = await tool(app, 'wxmp_replay_request').handler({ session_id: 'session-1', request_id: 'request-1' });
+  const payload = JSON.parse((response.content[0] as { type: 'text'; text: string }).text) as { data: { contextId: string } };
+  assert.equal(payload.data.contextId, 'ctx-selected');
+  assert.deepEqual(sentContexts, ['ctx-selected']);
+});
+
 test('large replay bodies are replaced in both value and raw CDP response', async () => {
   const body = 'x'.repeat(210_000);
   const sentContexts: string[] = [];

@@ -1,3 +1,5 @@
+import { WX_RUNTIME_RESOLVER_SOURCE } from './wx-runtime.js';
+
 export interface ReplayInput {
   url: string;
   method: string;
@@ -10,9 +12,9 @@ export function buildReplayExpression(request: ReplayInput): string {
 }
 
 export function buildWxApiExpression(api: string, options: unknown): string {
-  return `(async()=>{const fn=globalThis.wx?.[${JSON.stringify(api)}];if(typeof fn!=='function')throw new Error('wx API unavailable: '+${JSON.stringify(api)});const input=${JSON.stringify(options)};return await new Promise((resolve,reject)=>fn({...input,success:(value)=>resolve({ok:true,value}),fail:(error)=>reject(error)}));})()`;
+  return `(async()=>{${WX_RUNTIME_RESOLVER_SOURCE};const runtime=__wxmpResolveRuntime();const fn=runtime.wx?.[${JSON.stringify(api)}];if(typeof fn!=='function')throw new Error('wx API unavailable: '+${JSON.stringify(api)});const input=${JSON.stringify(options)};return await new Promise((resolve,reject)=>fn.call(runtime.wx,{...input,success:(value)=>resolve({ok:true,value}),fail:(error)=>reject(error)}));})()`;
 }
 
 export function buildCloudFunctionExpression(name: string, data: unknown): string {
-  return `(async()=>{if(!globalThis.wx?.cloud?.callFunction)throw new Error('wx.cloud.callFunction unavailable');return await globalThis.wx.cloud.callFunction(${JSON.stringify({ name, data })});})()`;
+  return `(async()=>{${WX_RUNTIME_RESOLVER_SOURCE};const runtime=__wxmpResolveRuntime();const cloud=runtime.wx?.cloud;if(!cloud?.callFunction)throw new Error('wx.cloud.callFunction unavailable');return await cloud.callFunction(${JSON.stringify({ name, data })});})()`;
 }

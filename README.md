@@ -18,7 +18,8 @@ Project tracking:
 - disconnect/reconnect retention plus `wxmp_wait_for_runtime` without reinjecting Frida
 - evidence-backed capability probing; transport connection alone does not advertise debugger/network/trace success
 - AppService/WebView/mini-game context probing with automatic strongest-context selection
-- dynamic inspection, breakpoints, context-scoped network capture, `wx.*` tracing, request hooks, replay, and evidence export
+- PC WMPF `wx` runtime resolution across `globalThis`, `nav.wxFrame`, parent windows, and accessible child frames
+- dynamic inspection, breakpoints, context-scoped network capture, `wx.*` tracing, request hooks, replay, and evidence export; unscoped WMPF events fall back to the selected context
 - pluggable static backends, with Gwxapkg as the default adapter
 - hash-bound generated profile candidates with explicit review-evidence promotion before injection
 - bundled v19977 clean-room profile and AOB signature database, discovered automatically from the package
