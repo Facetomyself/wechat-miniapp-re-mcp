@@ -6,7 +6,7 @@ Current working state:
 
 - Child branch: `feat/complete-runtime-gates`
 - Package version: `0.3.0`
-- v0.3.0 remediation is implemented and locally verified; remote publication/PR CI, parent gitlink update, and repeatable live semantic gates remain pending.
+- v0.3.0 remediation is delivered through PR #6 with green Node 20/22 CI; the parent gitlink update and repeatable live semantic gates remain pending.
 - Overall implementation completion: about 90%.
 - Original acceptance completion: about 84%.
 
@@ -32,13 +32,13 @@ The project is not marked 100% complete. Transport connectivity, tool invocation
 
 | Phase | Status | Completion | Verified evidence | Remaining gate |
 |---|---|---:|---|---|
-| 0. Repository and governance | Complete | 100% | Child repository, submodule boundary, MIT license, ignore rules, clean-room/legacy separation | Merge v0.3.0 through a green PR |
+| 0. Repository and governance | Complete | 100% | Child repository, submodule boundary, MIT license, ignore rules, clean-room/legacy separation | — |
 | 1. Lightweight MCP core | Implementation complete | 100% | stdio cold start, schema validation, structured errors, codec/bridge tests, reconnect ownership, evidence persistence | Official MCP conformance remains optional follow-up |
 | 2. Dynamic reverse workflow | Gated | 85% | v19977 bridge, evaluate, source enumeration, Network events, disconnect/reconnect observed; semantic guards implemented | Repeat live v0.3 gate for AppService selection, bound/hit breakpoint, non-zero trace/hook event, replay result, detach |
 | 3. Static reverse workflow | Implementation complete | 95% | main/plugin/subpackage/minigame fixtures previously decompiled/indexed; path/no-output guards covered | Add reproducible real Gwxapkg subprocess fixture to CI |
 | 4. Profile lifecycle | Gated | 90% | canonical v19977 reviewed profile, module SHA-256 gate, candidate promotion, default AOB database wiring | Validate clean-room AOB/profile on a second real WMPF version |
 | 5. Parent integration | Pending refresh | 90% | existing on-demand config and Gwxapkg integration remain compatible | Restart/re-enable parent MCP with v0.3.0 build and update parent docs/gitlink |
-| 6. Git delivery | Pending | 65% | initial v0.1/v0.2 PR history exists; the v0.3.0 local gate is green | Publish the latest v0.3.0 commit, open PR, require Node 20/22 green CI, merge, update parent gitlink |
+| 6. Git delivery | Complete | 100% | PR #6 carries v0.3.0; Node 20 and Node 22 checks are green | — |
 
 ## Automated verification
 
@@ -76,7 +76,7 @@ v0.3.0 now reports these gaps instead of treating command responses as success. 
 2. Keep the mini-program foreground before attach; the WMPF debug filter remains lifecycle-triggered.
 3. Obtain a second WMPF binary and validate AOB uniqueness, hash binding, attach, and detach.
 4. Add a small distributable static fixture or controlled backend stub for CI subprocess verification.
-5. Push the latest child commit, open a PR, require both Node matrix jobs to pass, merge, then update the parent submodule gitlink and integration docs.
+5. Update the parent submodule gitlink and integration docs to the merged v0.3.0 child commit.
 
 ## Update rule
 
