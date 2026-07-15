@@ -34,7 +34,7 @@ The project is not marked 100% complete. Transport connectivity, tool invocation
 - `wxmp_call_wx_api`, cloud calls, trace injection, and request hooks use the same runtime resolver and expose `wxRuntimePath`.
 - Empty WMPF event `contextId` values are normalized as unscoped; source, breakpoint, body, and replay operations fall back to the selected context.
 - The WMPF v19977 live semantic gate passed AppService selection, evaluate, a real breakpoint location, 727 trace wrappers, `wx.request`/fetch/XHR hook installation, fixture hook events, API inventory, Network body retrieval, replay, same-session restart/reconnect, detach, and evidence export.
-- Live summary: `workspace/live-verification/wechat-miniapp/live-semantic-gate-v030-1784105083771.json`; session evidence: `sessions/wxmp-56509ca4-9ad7-474c-bacd-cefde09ccc1f/` below that project root.
+- Live summary: `workspace/live-verification/wechat-miniapp/live-semantic-gate-v031-1784111644618.json`; session evidence: `sessions/wxmp-72a7c884-209a-4533-ab75-560495360c8a/` below that project root.
 
 ## Phase status
 
