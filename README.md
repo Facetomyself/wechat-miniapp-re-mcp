@@ -16,9 +16,12 @@ Project tracking:
 - explicit `session_id` / `context_id` isolation with one fail-safe active WMPF runtime slot
 - lazy Frida attach and a local WMPF protobuf/CDP bridge
 - disconnect/reconnect retention plus `wxmp_wait_for_runtime` without reinjecting Frida
-- dynamic inspection, breakpoints, network capture, `wx.*` tracing, replay, and evidence export
+- evidence-backed capability probing; transport connection alone does not advertise debugger/network/trace success
+- AppService/WebView/mini-game context probing with automatic strongest-context selection
+- dynamic inspection, breakpoints, context-scoped network capture, `wx.*` tracing, request hooks, replay, and evidence export
 - pluggable static backends, with Gwxapkg as the default adapter
 - hash-bound generated profile candidates with explicit review-evidence promotion before injection
+- bundled v19977 clean-room profile and AOB signature database, discovered automatically from the package
 - clean-room protocol implementation; legacy First profiles can be consumed from an external local directory but are not copied into this repository
 
 ## Development
@@ -37,11 +40,13 @@ Start the server:
 Useful environment variables:
 
 - `WXMP_WORKSPACE_ROOT`: artifact root; defaults to `<cwd>/workspace`
-- `WXMP_PROFILE_DIR`: clean-room profile directory
+- `WXMP_PROFILE_DIR`: additional clean-room profile directories; the bundled `data/profiles/clean-room` directory is loaded automatically
 - `WXMP_LEGACY_PROFILE_DIR`: optional local First-style profile directory
+- `WXMP_SIGNATURE_DB`: additional clean-room AOB signature database paths
 - `WXMP_GWXAPKG`: path to the Gwxapkg executable; the parent repository builds it under `tools/Gwxapkg-runtime/`
 - `WXMP_DEBUG_HOST` / `WXMP_DEBUG_PORT`: WMPF bridge listener, defaults to `127.0.0.1:9421`
 - `WXMP_EVENT_LIMIT`: maximum events returned by one evidence query, defaults to `5000`
+- `WXMP_MAX_EVIDENCE_EVENTS`: maximum persisted events per session before overflow is recorded, defaults to `100000`
+- `WXMP_MAX_EVIDENCE_BYTES`: maximum persisted NDJSON bytes per session, defaults to `268435456` (256 MiB); oversized individual events are stored as bounded previews
 
-The repository is private during initial development. Do not commit wxapkg files, extracted source trees, credentials, captures, WeChat profiles, WMPF binaries, or generated evidence.
-Reverse-engineering focused WeChat Mini Program and WMPF debugging MCP server
+The repository is private during initial development. Do not commit wxapkg files, extracted source trees, credentials, captures, third-party profiles, WMPF binaries, or generated evidence.

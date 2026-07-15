@@ -1,15 +1,7 @@
 import { WxmpApp } from '../app.js';
-import { safeProjectName } from '../security.js';
 import { VERSION } from '../version.js';
-import { bool, entry, numberProp, num, objectSchema, optionalText, result, stringProp, text } from './helpers.js';
+import { entry, int, numberProp, objectSchema, optionalText, result, stringProp, text } from './helpers.js';
 import { ToolEntry } from './types.js';
-
-function sessionContext(app: WxmpApp, args: Record<string, unknown>, required = true): { sessionId: string; contextId: string } {
-  const sessionId = text(args, 'session_id');
-  const contextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
-  if (required && !contextId) throw new Error('CONTEXT_NOT_SELECTED');
-  return { sessionId, contextId };
-}
 
 export function buildSessionTools(app: WxmpApp): ToolEntry[] {
   return [
@@ -17,6 +9,8 @@ export function buildSessionTools(app: WxmpApp): ToolEntry[] {
       content: [{ type: 'text', text: JSON.stringify({ ok: true, data: {
         name: 'wechat-miniapp-re-mcp', version: VERSION, platform: process.platform,
         workspaceRoot: app.config.workspaceRoot, bridge: app.sessions.bridge.info(), staticAdapter: app.staticAdapter.info(),
+        profileDirs: app.config.profileDirs, signatureDbPaths: app.config.signatureDbPaths,
+        evidence: { queryLimit: app.config.eventLimit, maxEvents: app.config.maxEvidenceEvents, maxBytes: app.config.maxEvidenceBytes },
         startupRequiresTarget: false,
       } }, null, 2) }],
     })),
@@ -32,10 +26,10 @@ export function buildSessionTools(app: WxmpApp): ToolEntry[] {
       connect_timeout_ms: numberProp('How long to wait for a WMPF debug WebSocket connection.'),
     }, ['project_name']), async (args) => {
       const session = await app.sessions.attach({
-        pid: args.pid === undefined ? undefined : num(args, 'pid'),
+        pid: args.pid === undefined ? undefined : int(args, 'pid', undefined, 1),
         projectName: text(args, 'project_name'),
         profilePath: optionalText(args, 'profile_path'),
-        connectTimeoutMs: args.connect_timeout_ms === undefined ? undefined : num(args, 'connect_timeout_ms'),
+        connectTimeoutMs: args.connect_timeout_ms === undefined ? undefined : int(args, 'connect_timeout_ms', undefined, 1, 120_000),
       });
       return result(app.sessions.publicStatus(session));
     }),
@@ -47,7 +41,7 @@ export function buildSessionTools(app: WxmpApp): ToolEntry[] {
 
     entry('wxmp_session_status', 'Read one session state, capabilities, contexts, and evidence path.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => result(app.sessions.publicStatus(app.sessions.get(text(args, 'session_id'))))),
 
-    entry('wxmp_wait_for_runtime', 'Wait for an attached or disconnected WMPF session to connect again without reinjecting Frida.', objectSchema({ session_id: stringProp('Session identifier.'), timeout_ms: numberProp('Wait timeout in milliseconds.') }, ['session_id']), async (args) => result(await app.sessions.waitForRuntime(text(args, 'session_id'), Math.min(120_000, Math.max(1, num(args, 'timeout_ms', 30_000)))))),
+    entry('wxmp_wait_for_runtime', 'Wait for an attached or disconnected WMPF session to connect again without reinjecting Frida.', objectSchema({ session_id: stringProp('Session identifier.'), timeout_ms: numberProp('Wait timeout in milliseconds.') }, ['session_id']), async (args) => result(await app.sessions.waitForRuntime(text(args, 'session_id'), int(args, 'timeout_ms', 30_000, 1, 120_000)))),
 
     entry('wxmp_list_contexts', 'List JS contexts observed for a WMPF session.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => {
       const session = app.sessions.get(text(args, 'session_id'));
@@ -57,6 +51,15 @@ export function buildSessionTools(app: WxmpApp): ToolEntry[] {
     entry('wxmp_select_context', 'Select the default JS context for subsequent tools.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('WMPF JS context identifier.'),
     }, ['session_id', 'context_id']), async (args) => result(app.sessions.selectContext(text(args, 'session_id'), text(args, 'context_id')))),
+
+    entry('wxmp_probe_contexts', 'Probe every observed runtime context and select the strongest AppService/wx-capable candidate.', objectSchema({
+      session_id: stringProp('Session identifier.'),
+    }, ['session_id']), async (args) => {
+      const sessionId = text(args, 'session_id');
+      const contexts = await app.sessions.probeContexts(sessionId);
+      const session = app.sessions.get(sessionId);
+      return result({ selectedContextId: session.selectedContextId, contexts });
+    }),
 
     entry('wxmp_get_runtime_info', 'Return target, profile, bridge, context, and capability information.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => result(app.sessions.publicStatus(app.sessions.get(text(args, 'session_id'))))),
   ];

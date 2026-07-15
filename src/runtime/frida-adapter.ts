@@ -11,6 +11,7 @@ export class FridaRuntimeAdapter {
     target: TargetProcess,
     profile: OffsetProfile,
     onEvent: (event: unknown) => void,
+    onDetached?: (event: { reason: string; crash: unknown }) => void,
   ): Promise<FridaHandle> {
     let frida: typeof import('frida');
     try {
@@ -49,6 +50,11 @@ export class FridaRuntimeAdapter {
     }
 
     let detached = false;
+    session.detached.connect((reason, crash) => {
+      if (detached) return;
+      detached = true;
+      onDetached?.({ reason: String(reason), crash });
+    });
     return {
       detach: async () => {
         if (detached) return;

@@ -1,6 +1,6 @@
 {
   "name": "wechat-miniapp-re-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Reverse-engineering focused MCP server for PC WeChat WMPF and wxapkg targets",
   "private": true,
   "license": "MIT",

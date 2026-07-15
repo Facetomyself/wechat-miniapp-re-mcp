@@ -13,10 +13,13 @@ function mockConfig(workspaceRoot: string): AppConfig {
     workspaceRoot,
     profileDirs: [],
     legacyProfileDirs: [],
+    signatureDbPaths: [],
     gwxapkgPath: null,
     debugHost: '127.0.0.1',
     debugPort: 0,
     eventLimit: 5000,
+    maxEvidenceEvents: 100_000,
+    maxEvidenceBytes: 256 * 1024 * 1024,
   };
 }
 
@@ -89,6 +92,7 @@ test('SessionManager.publicStatus shape includes required fields', async () => {
       debugger: true,
       network: true,
       wxTrace: true,
+      requestHook: false,
       staticAdapter: true,
       minigameDynamic: 'unknown' as const,
     },
@@ -96,6 +100,9 @@ test('SessionManager.publicStatus shape includes required fields', async () => {
     channel: null as unknown as WxmpSession['channel'],
     frida: null,
     findings: [],
+    traceContextIds: new Set(),
+    requestHookContextIds: new Set(),
+    runtimeGeneration: 1,
   };
 
   const manager = new SessionManager(mockConfig(root));

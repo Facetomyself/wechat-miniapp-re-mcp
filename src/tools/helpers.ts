@@ -28,13 +28,23 @@ export function optionalText(args: Record<string, unknown>, key: string): string
 
 export function num(args: Record<string, unknown>, key: string, fallback?: number): number {
   if (args[key] === undefined && fallback !== undefined) return fallback;
-  const value = Number(args[key]);
-  if (!Number.isFinite(value)) throw new WxmpError('INVALID_ARGUMENT', `${key} must be numeric`);
+  const value = args[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new WxmpError('INVALID_ARGUMENT', `${key} must be numeric`);
   return value;
 }
 
 export function bool(args: Record<string, unknown>, key: string, fallback = false): boolean {
-  return args[key] === undefined ? fallback : Boolean(args[key]);
+  if (args[key] === undefined) return fallback;
+  if (typeof args[key] !== 'boolean') throw new WxmpError('INVALID_ARGUMENT', `${key} must be boolean`);
+  return args[key];
+}
+
+export function int(args: Record<string, unknown>, key: string, fallback?: number, min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER): number {
+  const value = num(args, key, fallback);
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new WxmpError('INVALID_ARGUMENT', `${key} must be an integer between ${min} and ${max}`);
+  }
+  return value;
 }
 
 export function stringArray(args: Record<string, unknown>, key: string): string[] {

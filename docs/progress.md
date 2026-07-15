@@ -2,89 +2,82 @@
 
 Last updated: 2026-07-15
 
-Current branches:
+Current working state:
 
-- Child: `feat/complete-runtime-gates` based on `main` (v0.2.0 + follow-up commits)
-- Parent: `main` with v0.2.0 gitlink bump committed
+- Child branch: `feat/complete-runtime-gates`
+- Package version: `0.3.0`
+- v0.3.0 remediation is implemented and locally verified; remote publication/PR CI, parent gitlink update, and repeatable live semantic gates remain pending.
+- Overall implementation completion: about 90%.
+- Original acceptance completion: about 84%.
 
-Current overall completion: 100%. All phases complete. Phase 4 cross-version AOB validation is deferred pending a second WMPF binary on the host system. v0.2.0 closes implementation-level reconnect, profile-hash/review, evidence, and static-output gaps; the remaining percentage is dominated by repeatable live-target gates and multi-version clean-room signatures.
+The project is not marked 100% complete. Transport connectivity, tool invocation, and semantic capability success are tracked separately.
 
-Git delivery tracking:
+## v0.3.0 review remediation
 
-- Child implementation commit: `f592d3a119218e5ad925bd7794d2ce9ea84d7277`.
-- Child PR: [Facetomyself/wechat-miniapp-re-mcp#1](https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/1).
-- Child PR state: merged on 2026-07-14 after CI `test` passed.
-- Child reviewed merge commit: `3f91759d265f8fc9cbb42da306ccd75b88919125`.
-- Child latest commits: `24c2991` (feat: CDP execution context tracking), `95f9165` (docs: progress update), `e4cd3dc` (test: 9→43 tests).
-- Parent integration PR: [Facetomyself/reverse_ENV#1](https://github.com/Facetomyself/reverse_ENV/pull/1), **merged** on 2026-07-14.
+- Runtime capability flags now depend on successful CDP domain probes or non-zero installed wrappers.
+- Added `wxmp_probe_contexts`; contexts record role, library metadata, `hasWx`, origin, confidence, and context-scoped capabilities.
+- Script and request indexes retain their WMPF `contextId`; source retrieval, script breakpoints, request body retrieval, and replay use the originating context.
+- Trace start rejects `wrapped=0`; runtime evaluation exceptions become structured errors.
+- Request hooks now cover `wx.request`, `fetch`, and `XMLHttpRequest`; hook-backed API inventory reads the correct CDP return value and context.
+- DevTools proxy remaps request IDs per client and broadcasts events without leaking internal command responses.
+- Evidence reads/summaries stream NDJSON; per-session event/byte caps, oversized-event previews, malformed-line findings, write-error recovery, and explicit flush were added.
+- Tool arguments are validated against their published JSON Schemas before handler execution; numeric/boolean parsers are strict.
+- Static index/repack paths reject missing input and no-output success cases.
+- Profile/AOB parsing rejects trailing garbage and malformed signature bytes.
+- Bundled `data/profiles/clean-room/windows-19977.json` and `aob-signatures.json` are discovered automatically.
+- Third-party copied WMPF profile data was removed from Git; external legacy profiles remain runtime-only fallback inputs.
+- CI now runs the complete gate on Node.js 20 and 22.
 
 ## Phase status
 
-| Phase | Status | Completion | Evidence | Remaining gate |
-|------|--------|------------|----------|----------------|
-| 0. Repository and governance | Complete | 100% | Private GitHub repository created; parent submodule registered; parent governance committed as `0976548`; child `AGENTS.md` and development rules added | Child and parent PRs remain in Phase 6 |
-| 1. Lightweight MCP core | Complete | 100% | TypeScript stdio server; structured errors; Windows target discovery; session/context model; evidence store; protobuf/CDP bridge; 48 tools; cold-start list-tools/health smoke; 57 unit tests covering codec, bridge, CDP channel, config, errors, evidence, expressions, trace, profile, security, session manager, static adapter, and target discovery | Continue regression coverage as APIs evolve |
-| 2. Dynamic reverse workflow | Complete | 100% | Real WMPF `19977` discovery/attach and two full CDP evidence runs; disconnect→reconnect cycle verified (2026-07-15: same session `wxmp-dc97639e`, 5 contexts restored after scene reload); evaluate, breakpoint (URL regex), Network capture (10 XHR), trace, API inventory, evidence export (1581 events) all passed | — |
-| 3. Static reverse workflow | Complete | 100% | Gwxapkg `v2.7.4` pinned; reproducible parent build; plaintext fixture verified; real-world main package `wx49b99bcdc8104823` (438 files), plugin `__PLUGINCODE__` (33 files), subpackage `wxca8d4b8e8feedc2a` (330 files), and mini-game `wxeb3a3f764474c346` (2183 files, Cocos Creator, 78 wx APIs, 24 API endpoints) all decompiled and indexed | — |
-| 4. Profile lifecycle | Complete | 95% | Clean-room AOB signature database built from v19977 flue.dll (unique 1/1 matches for cdpFilter+loadStart); generate→validate→promote workflow verified; 44-version offset reference from WMPFDebugger; high-confidence reviewed profile stored at data/profiles/clean-room/ | Cross-version AOB validation on a second WMPF binary (no second version installed on current system) |
-| 5. Parent integration | Complete | 100% | Gwxapkg wrapper/runtime ignore, on-demand Codex config, MCP/tool docs, reverse-coordinator route, parent config parse, workspace audit, final diff review, and parent PR opened | Operational activation remains tied to the Phase 2 real CDP gate rather than this integration phase |
-| 6. Git delivery | Complete | 100% | Initial child and parent PRs merged; v0.2.0 feature branch commits pushed (6c0b040); `.mcp.json` retains the project availability declaration while `.codex/config.toml` keeps the server on-demand until the repeatable live gate passes | — |
+| Phase | Status | Completion | Verified evidence | Remaining gate |
+|---|---|---:|---|---|
+| 0. Repository and governance | Complete | 100% | Child repository, submodule boundary, MIT license, ignore rules, clean-room/legacy separation | Merge v0.3.0 through a green PR |
+| 1. Lightweight MCP core | Implementation complete | 100% | stdio cold start, schema validation, structured errors, codec/bridge tests, reconnect ownership, evidence persistence | Official MCP conformance remains optional follow-up |
+| 2. Dynamic reverse workflow | Gated | 85% | v19977 bridge, evaluate, source enumeration, Network events, disconnect/reconnect observed; semantic guards implemented | Repeat live v0.3 gate for AppService selection, bound/hit breakpoint, non-zero trace/hook event, replay result, detach |
+| 3. Static reverse workflow | Implementation complete | 95% | main/plugin/subpackage/minigame fixtures previously decompiled/indexed; path/no-output guards covered | Add reproducible real Gwxapkg subprocess fixture to CI |
+| 4. Profile lifecycle | Gated | 90% | canonical v19977 reviewed profile, module SHA-256 gate, candidate promotion, default AOB database wiring | Validate clean-room AOB/profile on a second real WMPF version |
+| 5. Parent integration | Pending refresh | 90% | existing on-demand config and Gwxapkg integration remain compatible | Restart/re-enable parent MCP with v0.3.0 build and update parent docs/gitlink |
+| 6. Git delivery | Pending | 65% | initial v0.1/v0.2 PR history exists; the v0.3.0 local gate is green | Publish the latest v0.3.0 commit, open PR, require Node 20/22 green CI, merge, update parent gitlink |
 
-## Current automated verification
+## Automated verification
 
-- `npm run typecheck`: passed.
-- `npm run build`: passed.
-- Node test suite: 57 tests passed (up from 9).
-- MCP contract: 52 `wxmp_*` tools, required tools present, no duplicate names.
-- Real-target CDP chain (2026-07-15): attach→evaluate→breakpoint(URL regex)→Network(10 XHR)→trace→API inventory→scene reload disconnect/reconnect→detach verified on WMPF v19977 (`wx49b99bcdc8104823`), 1581 evidence events.
-- stdio smoke: list-tools and `wxmp_health` passed without a WeChat dependency.
-- Mock bridge: pending-session assignment and bidirectional WMPF CDP envelope routing passed.
-- Static fixture (plaintext): Gwxapkg produced the expected `app.js`, `app.json`, and manifest.
-- Static fixtures (real-world): main wxapkg `wx49b99bcdc8104823` (438 files), plugin `__PLUGINCODE__` (33 files), subpackage `wxca8d4b8e8feedc2a` (330 files) — all decompiled, search, buildIndex (469 URLs, 41 wx APIs, 21 routes), repack verified.
-- Gwxapkg wrapper: `v2.7.4` rebuilt from pinned commit and recorded a runtime SHA-256.
-- Parent config parse: `.mcp.json` JSON and `.codex/config.toml` TOML passed.
-- Workspace governance: exit 0, 0 errors, 11 pre-existing warnings outside this MCP project.
+- TypeScript strict typecheck and build.
+- Node test suite: 73 passing tests covering bridge, codec, CDP state, context/request indexing, originating-context source/replay behavior, request hooks, proxy client ID/context isolation, evidence count/byte overflow and write recovery, profile gates, static guards, server schema validation, and target discovery.
+- MCP contract checks required tools, prefix, duplicates, and minimum inventory.
+- stdio smoke verifies initialize, list-tools, and `wxmp_health` without WeChat.
+- Production dependency audit reports no known vulnerabilities at the time of this update.
 
-### Test coverage by module
+## Real-target evidence status
 
-| Module | Tests | Key scenarios |
-|--------|-------|---------------|
-| `transport/codec` | 1 | CDP envelope round-trip (no compression) |
-| `transport/bridge-server` | 3 | Pending session assignment, bidirectional CDP routing, same-owner reconnect queue, concurrent-owner rejection |
-| `transport/cdp-channel` | 10 | Command/response, timeout, script/network indexing, paused state, trace extraction, close rejection, raw listeners, context creation/destruction, minigame detection |
-| `config` | 5 | Workspace root, debug port env, invalid port fallback, package roots, invalid event-limit fallback |
-| `errors` | 4 | WxmpError code/message/details, Error wrapping, non-Error, null |
-| `evidence/store` | 1 | NDJSON write, credential redaction, three-piece artifact export |
-| `runtime/expressions` | 6 | Replay, wx API, cloud function, trace script categories, syntactic validity |
-| `runtime/profile` | 10 | AOB matching, hash binding, hash mismatch, schema/path hardening, target-version binding, review gate/promotion, signature-set and adjusted-bound checks |
-| `security` | 2 | Credential key redaction, workspace traversal rejection |
-| `sessions/manager` | 5 | Empty session list, get error, bridge info, profile manager, publicStatus shape |
-| `static/adapter` | 9 | Scan/discover, limit, info, search, buildIndex, decompile error, missing-root error, controlled decompile/raw output arguments |
-| `runtime/target-discovery` | 1 | Main/renderer metadata parsing |
+Previously observed on WMPF v19977:
 
-## Real-target verification
+- main-process discovery and Frida hook load;
+- WMPF protobuf/CDP bridge connection;
+- script enumeration and source retrieval;
+- `Runtime.evaluate` responses;
+- Network request/response events;
+- same-session disconnect/requeue/reconnect;
+- evidence bundle export and detach.
 
-Environment observed:
+The previous evidence does not prove the following semantic gates:
 
-- WMPF version: `19977`
-- Main process discovery: passed.
-- 2026-07-15 repeat probe: main PID discovery, legacy profile load, Frida attach, waiting-state evidence, detach, and cleanup passed; no foreground scene transition occurred during the probe, so the CDP bridge remained pending.
-- Module: `flue.dll`
-- Profile offset bounds: passed.
-- Frida attach: passed.
-- Hook events observed: `module`, `cdp_filter_attached`, `load_start_attached`, `ready`.
-- Detach and local evidence cleanup: passed.
-- **Bridge CDP connection: passed.** 66 Debugger.scriptParsed events, 2192 evidence events, `Runtime.executionContextCreated` captured (3 contexts, `https://servicewechat.com`), Console API call stacks with full JS invocation chains.
-- **Disconnect/reconnect cycle: passed (2026-07-15).** Session `wxmp-dc97639e` survived scene reload: bridge disconnected→requeued→reconnected with 5 contexts restored; `wxmp_wait_for_runtime` confirmed reconnect without Frida reinjection.
-- Static fixtures: main (438 files), plugin (33 files), subpackage (330 files) all decompiled; search (155 hits), buildIndex (469 URLs, 41 APIs, 21 routes), repack all pass.
-- Known behavior: WMPF bridge disconnects when a mini-program load triggers a new scene during an active debug session. Workaround: restart WeChat, open mini-program FIRST, then attach MCP.
+- a breakpoint bound to a non-empty location or produced `Debugger.paused`;
+- a trace wrapper count greater than zero and at least one `trace.event`;
+- an installed request hook captured a fixture request;
+- request replay returned and was recorded;
+- a second WMPF module matched the clean-room AOB signatures.
+
+v0.3.0 now reports these gaps instead of treating command responses as success. Completion increases only after new live evidence closes them.
 
 ## Known limitations and next actions
 
-1. Phase 2: WMPF CDP bridge requires mini-program in foreground at attach time. See [`lessons-learned.md`](lessons-learned.md) for root cause analysis and recommended workflow.
-2. Phase 3: Find a mini-game wxapkg for the last remaining fixture type.
-3. Phase 4: Build clean-room signatures and validate a second WMPF version profile (e.g. `19841`) with live runtime — `addresses.19841.json` exists only as external compatibility input.
+1. Restart the currently running stdio server so port `127.0.0.1:9421` uses the v0.3.0 build, then run the complete live semantic gate.
+2. Keep the mini-program foreground before attach; the WMPF debug filter remains lifecycle-triggered.
+3. Obtain a second WMPF binary and validate AOB uniqueness, hash binding, attach, and detach.
+4. Add a small distributable static fixture or controlled backend stub for CI subprocess verification.
+5. Push the latest child commit, open a PR, require both Node matrix jobs to pass, merge, then update the parent submodule gitlink and integration docs.
 
 ## Update rule
 
-Update this document whenever a phase crosses an acceptance gate, a real-target capability changes, or a PR is opened/merged. Do not increase completion based only on newly added code.
+Update this document whenever a real acceptance gate changes, a public tool schema changes, or Git delivery state changes. Code existence, a returned CDP response, or a local-only pass is not sufficient evidence for 100% completion.

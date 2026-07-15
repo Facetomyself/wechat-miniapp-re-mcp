@@ -1,9 +1,9 @@
-import { existsSync, promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { WxmpApp } from '../app.js';
 import { WxmpError } from '../errors.js';
 import { SignatureSpec } from '../runtime/profile.js';
 import { resolveInside, safeProjectName } from '../security.js';
-import { entry, numberProp, num, objectSchema, optionalText, result, stringArray, stringProp, text } from './helpers.js';
+import { entry, int, numberProp, objectSchema, optionalText, result, stringArray, stringProp, text } from './helpers.js';
 import { ToolEntry } from './types.js';
 
 export function buildProfileTools(app: WxmpApp): ToolEntry[] {
@@ -12,7 +12,7 @@ export function buildProfileTools(app: WxmpApp): ToolEntry[] {
 
     entry('wxmp_profile_probe', 'Load and statically probe an offset profile against a WMPF module.', objectSchema({ pid: numberProp('WMPF PID.'), profile_path: stringProp('Optional profile path.') }, ['pid']), async (args) => {
       const targets = await app.sessions.listTargets();
-      const target = targets.find((item) => item.pid === num(args, 'pid'));
+      const target = targets.find((item) => item.pid === int(args, 'pid', undefined, 1));
       if (!target || !target.version) throw new WxmpError('TARGET_NOT_FOUND', 'Target or version not found');
       const loaded = await app.sessions.profileManager().load(target.version, optionalText(args, 'profile_path'));
       return result(await app.sessions.profileManager().probe(target, loaded.profile));
@@ -22,21 +22,24 @@ export function buildProfileTools(app: WxmpApp): ToolEntry[] {
       pid: numberProp('WMPF PID.'), project_name: stringProp('Workspace project.'),
       signatures: { type: 'array', items: { type: 'object', properties: { name: { enum: ['cdpFilter', 'loadStart'] }, pattern: { type: 'string' }, adjustment: { type: 'number' } }, required: ['name', 'pattern'] } },
       scene_offsets: { type: 'array', items: { type: 'number' } },
-    }, ['pid', 'project_name', 'signatures', 'scene_offsets']), async (args) => {
-      const target = (await app.sessions.listTargets()).find((item) => item.pid === num(args, 'pid'));
+    }, ['pid', 'project_name', 'scene_offsets']), async (args) => {
+      const target = (await app.sessions.listTargets()).find((item) => item.pid === int(args, 'pid', undefined, 1));
       if (!target) throw new WxmpError('TARGET_NOT_FOUND', 'Target not found');
-      const signatures = args.signatures as SignatureSpec[]; const sceneOffsets = (args.scene_offsets as number[]).map(Number);
+      const signatures = Array.isArray(args.signatures)
+        ? args.signatures as SignatureSpec[]
+        : await app.sessions.profileManager().signaturesForVersion(target.version ?? 0);
+      const sceneOffsets = (args.scene_offsets as number[]).map(Number);
       const profile = await app.sessions.profileManager().generate(target, signatures, sceneOffsets);
       const project = safeProjectName(text(args, 'project_name'));
       const dir = resolveInside(app.config.workspaceRoot, project, 'wechat-miniapp', 'profiles');
       await fs.mkdir(dir, { recursive: true });
       const outputPath = resolveInside(dir, `windows-${profile.wmpfVersion}-candidate.json`);
       await fs.writeFile(outputPath, `${JSON.stringify(profile, null, 2)}\n`, 'utf8');
-      return result({ profile, outputPath, warning: 'candidate profile requires validation and runtime review' });
+      return result({ profile, outputPath, signatures, warning: 'candidate profile requires validation and runtime review' });
     }),
 
     entry('wxmp_profile_validate', 'Validate profile schema, module hash, offset bounds, and injection readiness without injection.', objectSchema({ pid: numberProp('WMPF PID.'), profile_path: stringProp('Profile path.') }, ['pid', 'profile_path']), async (args) => {
-      const target = (await app.sessions.listTargets()).find((item) => item.pid === num(args, 'pid'));
+      const target = (await app.sessions.listTargets()).find((item) => item.pid === int(args, 'pid', undefined, 1));
       if (!target || !target.version) throw new WxmpError('TARGET_NOT_FOUND', 'Target not found');
       const manager = app.sessions.profileManager();
       const loaded = await manager.load(target.version, text(args, 'profile_path'));
@@ -54,7 +57,7 @@ export function buildProfileTools(app: WxmpApp): ToolEntry[] {
       confidence: { enum: ['medium', 'high'] }, reviewer: stringProp('Reviewer identifier.'),
       evidence: { type: 'array', items: { type: 'string' }, minItems: 1 }, note: stringProp('Optional review note.'),
     }, ['pid', 'candidate_path', 'project_name', 'confidence', 'reviewer', 'evidence']), async (args) => {
-      const target = (await app.sessions.listTargets()).find((item) => item.pid === num(args, 'pid'));
+      const target = (await app.sessions.listTargets()).find((item) => item.pid === int(args, 'pid', undefined, 1));
       if (!target || !target.version) throw new WxmpError('TARGET_NOT_FOUND', 'Target not found');
       const manager = app.sessions.profileManager();
       const loaded = await manager.load(target.version, text(args, 'candidate_path'));

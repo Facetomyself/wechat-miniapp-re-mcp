@@ -8,6 +8,7 @@ export function buildWxRequestHookSource(): string {
   const MAX_RECORDS = 200;
   const records = [];
   const originals = [];
+  const installed = [];
 
   function safeString(value, maxLen) {
     if (value === undefined || value === null) return undefined;
@@ -51,22 +52,23 @@ export function buildWxRequestHookSource(): string {
     const original = root.wx.request;
     if (!original.__wxmpHooked) {
       root.wx.request = function (options) {
+        const input = options && typeof options === 'object' ? options : {};
         const req = {
           type: 'wx.request',
-          url: (options || {}).url || '',
-          method: ((options || {}).method || 'GET').toUpperCase(),
-          headers: (options || {}).header || {},
-          body: safeString((options || {}).data, 4000),
+          url: input.url || '',
+          method: (input.method || 'GET').toUpperCase(),
+          headers: input.header || {},
+          body: safeString(input.data, 4000),
           timestamp: Date.now(),
           callStack: captureCallStack(),
           response: null
         };
 
-        const origSuccess = (options || {}).success;
-        const origFail = (options || {}).fail;
-        const origComplete = (options || {}).complete;
+        const origSuccess = input.success;
+        const origFail = input.fail;
+        const origComplete = input.complete;
 
-        options.success = function (res) {
+        input.success = function (res) {
           req.response = {
             status: res.statusCode,
             body: safeString(res.data, 8000),
@@ -75,12 +77,12 @@ export function buildWxRequestHookSource(): string {
           pushRecord(req);
           if (typeof origSuccess === 'function') origSuccess(res);
         };
-        options.fail = function (err) {
+        input.fail = function (err) {
           req.response = { status: 0, body: safeString(err, 2000), headers: {} };
           pushRecord(req);
           if (typeof origFail === 'function') origFail(err);
         };
-        options.complete = function (res) {
+        input.complete = function (res) {
           if (!req.response && res) {
             req.response = {
               status: res.statusCode || 0,
@@ -92,10 +94,11 @@ export function buildWxRequestHookSource(): string {
           if (typeof origComplete === 'function') origComplete(res);
         };
 
-        return original.call(this, options);
+        return original.call(this, input);
       };
       root.wx.request.__wxmpHooked = true;
       originals.push({ object: root.wx, key: 'request', original: original });
+      installed.push('wx.request');
     }
   }
 
@@ -105,13 +108,16 @@ export function buildWxRequestHookSource(): string {
     if (!originalFetch.__wxmpHooked) {
       root.fetch = function (input, init) {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
-        const method = (init && init.method) || 'GET';
+        const method = (init && init.method) || (input && input.method) || 'GET';
         const headers = {};
-        if (init && init.headers) {
-          if (init.headers instanceof Headers) {
-            init.headers.forEach(function (v, k) { headers[k] = v; });
-          } else if (typeof init.headers === 'object') {
-            Object.assign(headers, init.headers);
+        const headerSource = (init && init.headers) || (input && input.headers);
+        if (headerSource) {
+          if (typeof Headers !== 'undefined' && headerSource instanceof Headers) {
+            headerSource.forEach(function (v, k) { headers[k] = v; });
+          } else if (Array.isArray(headerSource)) {
+            for (var h = 0; h < headerSource.length; h++) headers[String(headerSource[h][0])] = String(headerSource[h][1]);
+          } else if (typeof headerSource === 'object') {
+            Object.assign(headers, headerSource);
           }
         }
         const req = {
@@ -147,6 +153,72 @@ export function buildWxRequestHookSource(): string {
       };
       root.fetch.__wxmpHooked = true;
       originals.push({ object: root, key: 'fetch', original: originalFetch });
+      installed.push('fetch');
+    }
+  }
+
+  // Hook XMLHttpRequest without replacing the constructor.
+  if (root.XMLHttpRequest && root.XMLHttpRequest.prototype) {
+    const proto = root.XMLHttpRequest.prototype;
+    const originalOpen = proto.open;
+    const originalSetRequestHeader = proto.setRequestHeader;
+    const originalSend = proto.send;
+    if (typeof originalOpen === 'function' && typeof originalSend === 'function' && !originalSend.__wxmpHooked) {
+      proto.open = function (method, url) {
+        this.__wxmpMeta = {
+          type: 'XMLHttpRequest',
+          url: String(url || ''),
+          method: String(method || 'GET').toUpperCase(),
+          headers: {},
+          timestamp: 0,
+          callStack: '',
+          response: null,
+          recorded: false
+        };
+        return originalOpen.apply(this, arguments);
+      };
+      if (typeof originalSetRequestHeader === 'function') {
+        proto.setRequestHeader = function (name, value) {
+          if (this.__wxmpMeta) this.__wxmpMeta.headers[String(name)] = String(value);
+          return originalSetRequestHeader.apply(this, arguments);
+        };
+      }
+      proto.send = function (body) {
+        const xhr = this;
+        const meta = xhr.__wxmpMeta || {
+          type: 'XMLHttpRequest', url: '', method: 'GET', headers: {}, response: null, recorded: false
+        };
+        meta.body = safeString(body, 4000);
+        meta.timestamp = Date.now();
+        meta.callStack = captureCallStack();
+        xhr.__wxmpMeta = meta;
+        const finalize = function () {
+          if (meta.recorded) return;
+          meta.recorded = true;
+          let responseBody;
+          try { responseBody = safeString(xhr.responseText, 8000); } catch (_) { responseBody = '[unavailable]'; }
+          meta.response = {
+            status: Number(xhr.status || 0),
+            body: responseBody,
+            headers: typeof xhr.getAllResponseHeaders === 'function' ? safeString(xhr.getAllResponseHeaders(), 4000) : ''
+          };
+          pushRecord(meta);
+        };
+        if (typeof xhr.addEventListener === 'function') xhr.addEventListener('loadend', finalize, { once: true });
+        else {
+          const previous = xhr.onreadystatechange;
+          xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4) finalize();
+            if (typeof previous === 'function') return previous.apply(this, arguments);
+          };
+        }
+        return originalSend.apply(xhr, arguments);
+      };
+      proto.send.__wxmpHooked = true;
+      originals.push({ object: proto, key: 'open', original: originalOpen });
+      if (typeof originalSetRequestHeader === 'function') originals.push({ object: proto, key: 'setRequestHeader', original: originalSetRequestHeader });
+      originals.push({ object: proto, key: 'send', original: originalSend });
+      installed.push('XMLHttpRequest');
     }
   }
 
@@ -164,10 +236,19 @@ export function buildWxRequestHookSource(): string {
       }
       this.active = false;
       records.length = 0;
-      return { restored: true, count: originals.length };
+      return { restored: true, count: originals.length, installed: installed.slice() };
     }
   };
 
-  return { ok: true, capabilities: { wx: typeof root.wx !== 'undefined', fetch: typeof root.fetch === 'function' } };
+  return {
+    ok: true,
+    installed: installed.slice(),
+    wrapped: installed.length,
+    capabilities: {
+      wx: typeof root.wx !== 'undefined',
+      fetch: typeof root.fetch === 'function',
+      xhr: typeof root.XMLHttpRequest === 'function'
+    }
+  };
 })()`;
 }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "description": "Clean-room AOB signature database for WMPF flue.dll hook points. Each entry captures byte patterns around known-good function entry points, usable for cross-version offset discovery via pattern matching.",
-  "source": "Clean-room extracted from WMPF v19977 flue.dll (SHA-256: pending) at known-good hook offsets, verified against WMPFDebugger frida/config/ addresses.19977.json.",
+  "source": "Clean-room extracted from the locally observed WMPF v19977 flue.dll at runtime-verified hook offsets.",
   "generatedAt": "2026-07-15",
   "verification": {
     "wmpfVersion": 19977,
@@ -12,10 +12,10 @@
     "loadStartUniqueMatch": 1,
     "matchDelta": -32,
     "status": "clean-room-verified",
-    "reviewedProfile": "data/profiles/clean-room/windows-19977-reviewed.json",
+    "reviewedProfile": "data/profiles/clean-room/windows-19977.json",
     "confidence": "high",
     "verifiedAt": "2026-07-15",
-    "runtimeVerification": "Full CDP chain passed on live WMPF v19977 (attach→evaluate→breakpoint→Network→trace→API inventory→disconnect/reconnect)"
+    "runtimeVerification": "Transport, context discovery, evaluate, Network events, evidence export, and disconnect/reconnect were observed on WMPF v19977. Breakpoint binding, wx trace, hook capture, and replay remain explicit semantic gates."
   },
   "signatures": {
     "cdpFilter": {

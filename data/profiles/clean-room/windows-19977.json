@@ -34,19 +34,18 @@
   "provenance": {
     "source": "generated",
     "confidence": "high",
-    "note": "Clean-room AOB signatures extracted from flue.dll v19977. Single unique match for both cdpFilter and loadStart patterns. Full runtime validation passed."
+    "note": "Clean-room AOB signatures extracted from flue.dll v19977. Single unique match for both hook patterns; transport/evaluate/network/reconnect runtime gates were observed."
   },
   "review": {
     "reviewer": "claude",
     "reviewedAt": "2026-07-15T04:32:55.712Z",
     "evidence": [
-      "AOB signature verified: unique 1/1 match on v19977 flue.dll",
-      "Offsets match WMPFDebugger addresses.19977.json (cross-reference)",
-      "Runtime attach+CDP bridge verified on live WMPF v19977 (2026-07-15)",
-      "Full CDP chain: evaluate→breakpoint→Network→trace→API inventory→disconnect/reconnect",
+      "AOB signature verified: unique 1/1 match on the reviewed v19977 flue.dll",
+      "Runtime attach and CDP bridge observed on live WMPF v19977 (2026-07-15)",
+      "Evaluate, Network events, evidence export, and disconnect/reconnect observed",
       "module-sha256:f569e0ddcd622e85fb33a0e2a4c647561fd27440c9612a54140572a42c8cfc7d"
     ],
     "decision": "promoted",
-    "note": "Clean-room AOB signatures extracted from flue.dll v19977. Single unique match for both cdpFilter and loadStart patterns. Full runtime validation passed."
+    "note": "Clean-room AOB signatures extracted from flue.dll v19977. Single unique match for both hook patterns; transport/evaluate/network/reconnect runtime gates were observed."
   }
 }

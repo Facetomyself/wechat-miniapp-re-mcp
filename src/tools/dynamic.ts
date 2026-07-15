@@ -1,15 +1,58 @@
 import { WxmpApp } from '../app.js';
+import { WxmpError } from '../errors.js';
 import { buildCloudFunctionExpression, buildReplayExpression, buildWxApiExpression } from '../runtime/expressions.js';
 import { buildTraceScript } from '../runtime/trace-script.js';
 import { buildWxRequestHookSource } from '../runtime/wx-request-hook.js';
-import { bool, booleanProp, entry, escapeRegExp, numberProp, num, objectSchema, optionalText, result, safeFile, stringArray, stringProp, text } from './helpers.js';
+import { extractRemoteValue } from '../transport/cdp-channel.js';
+import { bool, booleanProp, entry, escapeRegExp, int, numberProp, objectSchema, optionalText, result, safeFile, stringArray, stringProp, text } from './helpers.js';
 import { ToolEntry } from './types.js';
 
 function sessionContext(app: WxmpApp, args: Record<string, unknown>, required = true): { sessionId: string; contextId: string } {
   const sessionId = text(args, 'session_id');
   const contextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
-  if (required && !contextId) throw new Error('CONTEXT_NOT_SELECTED');
+  if (required && !contextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'Select or provide a runtime context before invoking this tool', { sessionId });
   return { sessionId, contextId };
+}
+
+function runtimeValue(response: Record<string, unknown>, operation: string): unknown {
+  const resultObject = response.result;
+  if (resultObject && typeof resultObject === 'object' && (resultObject as Record<string, unknown>).exceptionDetails) {
+    throw new WxmpError('RUNTIME_EVALUATION_FAILED', `${operation} raised a runtime exception`, {
+      exceptionDetails: (resultObject as Record<string, unknown>).exceptionDetails,
+    });
+  }
+  return extractRemoteValue(response);
+}
+
+function replaceRemoteValue(response: Record<string, unknown>, value: unknown): Record<string, unknown> {
+  const outer = response.result;
+  if (!outer || typeof outer !== 'object') return response;
+  const remote = (outer as Record<string, unknown>).result;
+  if (!remote || typeof remote !== 'object') return response;
+  return {
+    ...response,
+    result: {
+      ...(outer as Record<string, unknown>),
+      result: {
+        ...(remote as Record<string, unknown>),
+        value,
+      },
+    },
+  };
+}
+
+function previewRequest<T extends { postData?: string }>(request: T): T & {
+  postDataLength?: number;
+  postDataTruncated?: boolean;
+  postDataArtifactPath?: string;
+} {
+  if (typeof request.postData !== 'string' || request.postData.length <= 4000) return request;
+  return {
+    ...request,
+    postData: request.postData.slice(0, 4000),
+    postDataLength: request.postData.length,
+    postDataTruncated: true,
+  };
 }
 
 export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
@@ -23,49 +66,61 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
       const response = await session.channel.send('Runtime.evaluate', {
         expression: text(args, 'expression'), awaitPromise: bool(args, 'await_promise', true), returnByValue: bool(args, 'return_by_value', true), includeCommandLineAPI: true,
       }, contextId);
+      const value = runtimeValue(response, 'Runtime.evaluate');
       await session.evidence.append('active.evaluate', { expression: text(args, 'expression'), response }, { contextId, operation: 'Runtime.evaluate' });
-      return result(response);
+      return result({ response, value });
     }),
 
     entry('wxmp_raw_cdp', 'Send an arbitrary CDP method and parameters to WMPF.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('Optional JS context.'), method: stringProp('CDP method.'), params: { type: 'object', description: 'CDP params object.', additionalProperties: true }, timeout_ms: numberProp('Timeout in milliseconds.'),
     }, ['session_id', 'method']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args, false);
-      return result(await app.sessions.get(sessionId).channel.send(text(args, 'method'), (args.params ?? {}) as Record<string, unknown>, contextId, num(args, 'timeout_ms', 10_000)));
+      return result(await app.sessions.get(sessionId).channel.send(text(args, 'method'), (args.params ?? {}) as Record<string, unknown>, contextId, int(args, 'timeout_ms', 10_000, 1, 120_000)));
     }),
 
     // -- Scripts & breakpoints --
     entry('wxmp_list_scripts', 'List scripts reported by Debugger.scriptParsed.', objectSchema({
-      session_id: stringProp('Session identifier.'), offset: numberProp('Pagination offset.'), limit: numberProp('Page size.'), url_filter: stringProp('Optional URL substring.'),
+      session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context filter.'), offset: numberProp('Pagination offset.'), limit: numberProp('Page size.'), url_filter: stringProp('Optional URL substring.'),
     }, ['session_id']), async (args) => {
       const session = app.sessions.get(text(args, 'session_id'));
       await session.channel.send('Debugger.enable').catch(() => undefined);
       const filter = optionalText(args, 'url_filter')?.toLowerCase();
-      const all = [...session.channel.scripts.values()].filter((s) => !filter || s.url.toLowerCase().includes(filter));
-      const offset = num(args, 'offset', 0); const limit = Math.min(500, num(args, 'limit', 100));
+      const contextId = optionalText(args, 'context_id');
+      const all = [...session.channel.scripts.values()].filter((s) => (
+        (!filter || s.url.toLowerCase().includes(filter)) && (!contextId || s.contextId === contextId)
+      ));
+      const offset = int(args, 'offset', 0, 0); const limit = int(args, 'limit', 100, 1, 500);
       return result({ total: all.length, items: all.slice(offset, offset + limit) });
     }),
 
     entry('wxmp_get_source', 'Get script source; large sources are saved as evidence artifacts.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), script_id: stringProp('CDP scriptId.'), inline_limit: numberProp('Maximum source characters returned inline.'),
     }, ['session_id', 'script_id']), async (args) => {
-      const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
-      const response = await session.channel.send('Debugger.getScriptSource', { scriptId: text(args, 'script_id') }, contextId);
+      const sessionId = text(args, 'session_id'); const session = app.sessions.get(sessionId); const scriptId = text(args, 'script_id');
+      const selectedContextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
+      const contextId = session.channel.scripts.get(scriptId)?.contextId ?? selectedContextId;
+      if (!contextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The script is not associated with a runtime context and no context is selected', { sessionId, scriptId });
+      const response = await session.channel.send('Debugger.getScriptSource', { scriptId }, contextId);
       const source = String(((response.result ?? {}) as Record<string, unknown>).scriptSource ?? '');
-      const inlineLimit = num(args, 'inline_limit', 100_000);
-      if (source.length <= inlineLimit) return result({ scriptId: text(args, 'script_id'), source });
-      const artifactPath = await session.evidence.writeText(`script-${safeFile(text(args, 'script_id'))}.js`, source);
-      return result({ scriptId: text(args, 'script_id'), length: source.length, artifactPath, preview: source.slice(0, 4000) });
+      const inlineLimit = int(args, 'inline_limit', 100_000, 1, 1_000_000);
+      if (source.length <= inlineLimit) return result({ scriptId, contextId, source });
+      const artifactPath = await session.evidence.writeText(`script-${safeFile(scriptId)}.js`, source);
+      return result({ scriptId, contextId, length: source.length, artifactPath, preview: source.slice(0, 4000) });
     }),
 
     entry('wxmp_search_sources', 'Search loaded WMPF script sources and save evidence-backed matches.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), query: stringProp('Text or regular expression.'), regex: booleanProp('Treat query as regex.'), case_sensitive: booleanProp('Case-sensitive search.'), max_scripts: numberProp('Maximum scripts fetched.'), max_results: numberProp('Maximum matches.'),
     }, ['session_id', 'query']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
-      const expr = bool(args, 'regex') ? new RegExp(text(args, 'query'), bool(args, 'case_sensitive') ? 'g' : 'gi') : new RegExp(escapeRegExp(text(args, 'query')), bool(args, 'case_sensitive') ? 'g' : 'gi');
-      const maxScripts = Math.min(500, num(args, 'max_scripts', 100)); const maxResults = Math.min(5000, num(args, 'max_results', 200));
+      let expr: RegExp;
+      try {
+        expr = bool(args, 'regex') ? new RegExp(text(args, 'query'), bool(args, 'case_sensitive') ? 'g' : 'gi') : new RegExp(escapeRegExp(text(args, 'query')), bool(args, 'case_sensitive') ? 'g' : 'gi');
+      } catch (error) {
+        throw new WxmpError('INVALID_REGEX', 'Source search regular expression is invalid', { message: error instanceof Error ? error.message : String(error) });
+      }
+      const maxScripts = int(args, 'max_scripts', 100, 1, 500); const maxResults = int(args, 'max_results', 200, 1, 5000);
       const matches: Array<Record<string, unknown>> = [];
-      for (const script of [...session.channel.scripts.values()].slice(0, maxScripts)) {
+      for (const script of [...session.channel.scripts.values()].filter((item) => !contextId || item.contextId === contextId).slice(0, maxScripts)) {
         const response = await session.channel.send('Debugger.getScriptSource', { scriptId: script.scriptId }, contextId).catch(() => null);
         if (!response) continue;
         const source = String((((response.result ?? {}) as Record<string, unknown>).scriptSource) ?? '');
@@ -80,12 +135,23 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
     entry('wxmp_set_breakpoint', 'Set a breakpoint by script location, URL, or URL regex.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), script_id: stringProp('Optional scriptId.'), url: stringProp('Optional exact URL.'), url_regex: stringProp('Optional URL regex.'), line_number: numberProp('Zero-based line.'), column_number: numberProp('Zero-based column.'), condition: stringProp('Optional condition.'),
     }, ['session_id', 'line_number']), async (args) => {
-      const { sessionId, contextId } = sessionContext(app, args); const channel = app.sessions.get(sessionId).channel;
+      const sessionId = text(args, 'session_id'); const session = app.sessions.get(sessionId); const channel = session.channel;
       const scriptId = optionalText(args, 'script_id');
+      const url = optionalText(args, 'url');
+      const urlRegex = optionalText(args, 'url_regex');
+      if (!scriptId && !url && !urlRegex) throw new WxmpError('INVALID_ARGUMENT', 'Provide script_id, url, or url_regex for the breakpoint');
+      const selectedContextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
+      const contextId = scriptId ? channel.scripts.get(scriptId)?.contextId ?? selectedContextId : selectedContextId;
+      if (!contextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The breakpoint target is not associated with a runtime context and no context is selected', { sessionId, scriptId });
       const response = scriptId
-        ? await channel.send('Debugger.setBreakpoint', { location: { scriptId, lineNumber: num(args, 'line_number'), columnNumber: num(args, 'column_number', 0) }, condition: optionalText(args, 'condition') ?? '' }, contextId)
-        : await channel.send('Debugger.setBreakpointByUrl', { lineNumber: num(args, 'line_number'), columnNumber: num(args, 'column_number', 0), url: optionalText(args, 'url'), urlRegex: optionalText(args, 'url_regex'), condition: optionalText(args, 'condition') ?? '' }, contextId);
-      return result(response);
+        ? await channel.send('Debugger.setBreakpoint', { location: { scriptId, lineNumber: int(args, 'line_number', undefined, 0), columnNumber: int(args, 'column_number', 0, 0) }, condition: optionalText(args, 'condition') ?? '' }, contextId)
+        : await channel.send('Debugger.setBreakpointByUrl', { lineNumber: int(args, 'line_number', undefined, 0), columnNumber: int(args, 'column_number', 0, 0), ...(url ? { url } : {}), ...(urlRegex ? { urlRegex } : {}), condition: optionalText(args, 'condition') ?? '' }, contextId);
+      const locations = Array.isArray((response.result as Record<string, unknown> | undefined)?.locations)
+        ? (response.result as Record<string, unknown>).locations as unknown[]
+        : [];
+      const pending = !scriptId && locations.length === 0;
+      await session.evidence.append('debugger.breakpoint_set', { response, boundLocations: locations.length, pending }, { contextId, operation: 'set_breakpoint' });
+      return result({ response, contextId, boundLocations: locations.length, pending });
     }),
 
     entry('wxmp_remove_breakpoint', 'Remove a CDP breakpoint by identifier.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), breakpoint_id: stringProp('Breakpoint identifier.') }, ['session_id', 'breakpoint_id']), async (args) => {
@@ -107,26 +173,57 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
       const categories = stringArray(args, 'categories');
       const response = await session.channel.send('Runtime.evaluate', { expression: buildTraceScript(categories.length ? categories : ['all']), awaitPromise: true, returnByValue: true }, contextId);
-      session.channel.traceActive = true; await session.evidence.append('trace.started', { categories }, { contextId, operation: 'trace_start' });
-      return result(response);
+      const value = runtimeValue(response, 'trace injection');
+      const status = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+      const wrapped = Number(status.wrapped ?? 0);
+      const reused = status.reused === true;
+      if (!reused && (!Number.isSafeInteger(wrapped) || wrapped <= 0)) {
+        app.sessions.setCapability(sessionId, 'wxTrace', false, contextId);
+        app.sessions.recordFinding(session, {
+          id: `trace-target-${contextId}`,
+          title: 'Trace target exposes no wrappable wx APIs',
+          severity: 'medium',
+          summary: 'The selected context completed trace injection with wrapped=0; select or probe an AppService context.',
+          evidenceTypes: ['trace.unavailable'],
+        });
+        await session.evidence.append('trace.unavailable', { categories, response, value }, { contextId, operation: 'trace_start' });
+        throw new WxmpError('TRACE_TARGET_UNAVAILABLE', 'The selected context exposes no wrappable wx APIs', { contextId, value });
+      }
+      session.channel.traceActive = true;
+      app.sessions.setCapability(sessionId, 'wxTrace', true, contextId);
+      app.sessions.resolveFinding(session, `trace-target-${contextId}`);
+      await session.evidence.append('trace.started', { categories, wrapped, reused }, { contextId, operation: 'trace_start' });
+      return result({ response, value });
     }),
 
-    entry('wxmp_trace_query', 'Query persisted trace events for a session.', objectSchema({ session_id: stringProp('Session identifier.'), offset: numberProp('Offset.'), limit: numberProp('Limit.') }, ['session_id']), async (args) => result(await app.sessions.get(text(args, 'session_id')).evidence.readEvents(num(args, 'offset', 0), Math.min(1000, num(args, 'limit', 100)), 'trace.event'))),
+    entry('wxmp_trace_query', 'Query persisted trace events for a session.', objectSchema({ session_id: stringProp('Session identifier.'), offset: numberProp('Offset.'), limit: numberProp('Limit.') }, ['session_id']), async (args) => result(await app.sessions.get(text(args, 'session_id')).evidence.readEvents(int(args, 'offset', 0, 0), int(args, 'limit', 100, 1, 1000), 'trace.event'))),
 
     entry('wxmp_trace_stop', 'Restore wrapped wx/cloud methods and stop tracing.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.') }, ['session_id']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
       const response = await session.channel.send('Runtime.evaluate', { expression: 'globalThis.__wxmpTrace?.stop?.() ?? {restored:false}', returnByValue: true }, contextId);
-      session.channel.traceActive = false; await session.evidence.append('trace.stopped', {}, { contextId, operation: 'trace_stop' }); return result(response);
+      const value = runtimeValue(response, 'trace stop');
+      session.channel.traceActive = false;
+      app.sessions.setCapability(sessionId, 'wxTrace', false, contextId);
+      await session.evidence.append('trace.stopped', { value }, { contextId, operation: 'trace_stop' });
+      return result({ response, value });
     }),
 
     // -- Non-CDP request hook --
-    entry('wxmp_hook_wx_request', 'Inject non-destructive wrappers around wx.request, fetch, and XMLHttpRequest in the appservice context. Captures full request/response bodies and JavaScript call stacks independently of the CDP Network domain.', objectSchema({
+    entry('wxmp_hook_wx_request', 'Inject non-destructive wrappers around wx.request, fetch, and XMLHttpRequest in the appservice context. Captures bounded request/response body previews and JavaScript call stacks independently of the CDP Network domain.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'),
     }, ['session_id']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
       const response = await session.channel.send('Runtime.evaluate', { expression: buildWxRequestHookSource(), awaitPromise: true, returnByValue: true }, contextId);
-      await session.evidence.append('active.wx_request_hook', response, { contextId, operation: 'wxmp_hook_wx_request' });
-      return result(response);
+      const value = runtimeValue(response, 'request hook injection');
+      const status = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+      const installed = Array.isArray(status.installed) ? status.installed : [];
+      if (status.reused !== true && installed.length === 0) {
+        app.sessions.setCapability(sessionId, 'requestHook', false, contextId);
+        throw new WxmpError('REQUEST_HOOK_TARGET_UNAVAILABLE', 'The selected context exposes no supported request API', { contextId, value });
+      }
+      app.sessions.setCapability(sessionId, 'requestHook', true, contextId);
+      await session.evidence.append('active.wx_request_hook', { value }, { contextId, operation: 'wxmp_hook_wx_request' });
+      return result({ response, value });
     }),
 
     entry('wxmp_get_hooked_requests', 'Read captured wx.request, fetch, and XHR records drained from an active request hook, including response bodies and JS call stacks.', objectSchema({
@@ -134,7 +231,15 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
     }, ['session_id']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
       const response = await session.channel.send('Runtime.evaluate', { expression: 'globalThis.__wxmpRequestHook ? globalThis.__wxmpRequestHook.drain() : []', awaitPromise: true, returnByValue: true }, contextId);
-      return result(response);
+      const value = runtimeValue(response, 'request hook drain');
+      const records = Array.isArray(value) ? value : [];
+      await session.evidence.append('request_hook.drained', { count: records.length }, { contextId, operation: 'wxmp_get_hooked_requests' });
+      const encoded = JSON.stringify(records);
+      if (encoded.length > 200_000) {
+        const artifactPath = await session.evidence.writeJson(`hooked-requests-${Date.now()}.json`, records);
+        return result({ count: records.length, records: records.slice(0, 10), artifactPath, truncated: true });
+      }
+      return result({ count: records.length, records, truncated: false });
     }),
 
     entry('wxmp_unhook_wx_request', 'Restore original wx.request, fetch, and XMLHttpRequest and release the hook buffer.', objectSchema({
@@ -142,32 +247,70 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
     }, ['session_id']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
       const response = await session.channel.send('Runtime.evaluate', { expression: 'globalThis.__wxmpRequestHook?.stop?.() ?? {restored:false}', returnByValue: true }, contextId);
-      await session.evidence.append('active.wx_request_unhook', response, { contextId, operation: 'wxmp_unhook_wx_request' });
-      return result(response);
+      const value = runtimeValue(response, 'request hook stop');
+      app.sessions.setCapability(sessionId, 'requestHook', false, contextId);
+      await session.evidence.append('active.wx_request_unhook', { value }, { contextId, operation: 'wxmp_unhook_wx_request' });
+      return result({ response, value });
     }),
 
     // -- Network capture --
-    entry('wxmp_capture_start', 'Enable the CDP Network domain and begin request indexing.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), max_total_buffer_size: numberProp('CDP network buffer size.') }, ['session_id']), async (args) => { const { sessionId, contextId } = sessionContext(app, args); return result(await app.sessions.get(sessionId).channel.send('Network.enable', { maxTotalBufferSize: num(args, 'max_total_buffer_size', 100_000_000) }, contextId)); }),
+    entry('wxmp_capture_start', 'Enable the CDP Network domain and begin request indexing.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), max_total_buffer_size: numberProp('CDP network buffer size.') }, ['session_id']), async (args) => {
+      const { sessionId, contextId } = sessionContext(app, args);
+      const response = await app.sessions.get(sessionId).channel.send('Network.enable', { maxTotalBufferSize: int(args, 'max_total_buffer_size', 100_000_000, 1, 1_000_000_000) }, contextId);
+      app.sessions.setCapability(sessionId, 'network', true);
+      return result(response);
+    }),
 
-    entry('wxmp_capture_stop', 'Disable the CDP Network domain.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.') }, ['session_id']), async (args) => { const { sessionId, contextId } = sessionContext(app, args); return result(await app.sessions.get(sessionId).channel.send('Network.disable', {}, contextId)); }),
+    entry('wxmp_capture_stop', 'Disable the CDP Network domain.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.') }, ['session_id']), async (args) => {
+      const { sessionId, contextId } = sessionContext(app, args);
+      const response = await app.sessions.get(sessionId).channel.send('Network.disable', {}, contextId);
+      app.sessions.setCapability(sessionId, 'network', false);
+      return result(response);
+    }),
 
-    entry('wxmp_list_requests', 'List indexed network requests.', objectSchema({ session_id: stringProp('Session identifier.'), offset: numberProp('Offset.'), limit: numberProp('Limit.'), url_filter: stringProp('URL substring.') }, ['session_id']), async (args) => {
-      const session = app.sessions.get(text(args, 'session_id')); const filter = optionalText(args, 'url_filter')?.toLowerCase();
-      const all = [...session.channel.requests.values()].filter((r) => !filter || r.url.toLowerCase().includes(filter)); const offset = num(args, 'offset', 0); const limit = Math.min(500, num(args, 'limit', 100));
-      return result({ total: all.length, items: all.slice(offset, offset + limit) });
+    entry('wxmp_list_requests', 'List indexed network requests.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context filter.'), offset: numberProp('Offset.'), limit: numberProp('Limit.'), url_filter: stringProp('URL substring.') }, ['session_id']), async (args) => {
+      const session = app.sessions.get(text(args, 'session_id')); const filter = optionalText(args, 'url_filter')?.toLowerCase(); const contextId = optionalText(args, 'context_id');
+      const all = [...session.channel.requests.values()].filter((r) => (!filter || r.url.toLowerCase().includes(filter)) && (!contextId || r.contextId === contextId)); const offset = int(args, 'offset', 0, 0); const limit = int(args, 'limit', 100, 1, 500);
+      return result({ total: all.length, items: all.slice(offset, offset + limit).map((request) => previewRequest(request)) });
     }),
 
     entry('wxmp_get_request', 'Get one indexed request and optionally fetch its response body.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), request_id: stringProp('CDP requestId.'), include_body: booleanProp('Fetch response body.') }, ['session_id', 'request_id']), async (args) => {
-      const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId); const requestId = text(args, 'request_id'); const request = session.channel.requests.get(requestId);
-      if (!request) throw new Error('REQUEST_NOT_FOUND');
-      let body: unknown; if (bool(args, 'include_body')) body = await session.channel.send('Network.getResponseBody', { requestId }, contextId).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
-      return result({ request, body });
+      const sessionId = text(args, 'session_id'); const session = app.sessions.get(sessionId); const requestId = text(args, 'request_id'); const request = session.channel.requests.get(requestId);
+      if (!request) throw new WxmpError('REQUEST_NOT_FOUND', `Unknown request: ${requestId}`, { sessionId, requestId });
+      const requestContextId = request.contextId ?? app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
+      if (!requestContextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The request is not associated with a runtime context and no context is selected', { sessionId, requestId });
+      let body: unknown; if (bool(args, 'include_body')) body = await session.channel.send('Network.getResponseBody', { requestId }, requestContextId).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+      if (body && typeof body === 'object') {
+        const resultBody = (body as Record<string, unknown>).result;
+        const bodyText = resultBody && typeof resultBody === 'object' ? (resultBody as Record<string, unknown>).body : undefined;
+        if (typeof bodyText === 'string' && bodyText.length > 200_000) {
+          const artifactPath = await session.evidence.writeText(`response-${safeFile(requestId)}.txt`, bodyText);
+          body = {
+            ...(body as Record<string, unknown>),
+            result: {
+              ...(resultBody as Record<string, unknown>),
+              body: bodyText.slice(0, 4000),
+              bodyLength: bodyText.length,
+              artifactPath,
+              truncated: true,
+            },
+          };
+        }
+      }
+      let outputRequest = previewRequest(request);
+      if (typeof request.postData === 'string' && request.postData.length > 200_000) {
+        const artifactPath = await session.evidence.writeText(`request-${safeFile(requestId)}.txt`, request.postData);
+        outputRequest = { ...outputRequest, postDataArtifactPath: artifactPath };
+      }
+      return result({ request: outputRequest, body });
     }),
 
-    entry('wxmp_get_api_inventory', 'Build a deduplicated API inventory across CDP Network requests and wx.request/fetch hooks, grouped by domain.', objectSchema({
+    entry('wxmp_get_api_inventory', 'Build a deduplicated API inventory across CDP Network requests and wx.request/fetch/XMLHttpRequest hooks, grouped by domain.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), include_hooks: booleanProp('Also drain the wx.request/fetch hook buffer.'),
     }, ['session_id']), async (args) => {
-      const session = app.sessions.get(text(args, 'session_id'));
+      const sessionId = text(args, 'session_id');
+      const session = app.sessions.get(sessionId);
+      const contextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
       const urls = new Map<string, { methods: Set<string>; resourceTypes: Set<string>; statusCodes: number[] }>();
       const add = (url: string, method: string, resourceType: string, status?: number) => {
         if (!url || url.startsWith('data:') || url.startsWith('blob:')) return;
@@ -185,11 +328,12 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
       }
       // wx.request hook
       if (bool(args, 'include_hooks')) {
+        if (!contextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'Hook inventory requires a selected runtime context', { sessionId });
         try {
           const hookResponse = await session.channel.send('Runtime.evaluate', {
             expression: 'globalThis.__wxmpRequestHook ? globalThis.__wxmpRequestHook.drain() : []', awaitPromise: true, returnByValue: true,
-          });
-          const hooked = ((hookResponse.result ?? {}) as Record<string, unknown>).result;
+          }, contextId);
+          const hooked = runtimeValue(hookResponse, 'request hook inventory drain');
           if (Array.isArray(hooked)) {
             for (const record of hooked as Array<Record<string, unknown>>) {
               const url = String(record.url ?? ''); const method = String(record.method ?? 'GET');
@@ -197,7 +341,9 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
               add(url, method, 'wx.request-hook', status || undefined);
             }
           }
-        } catch (_) { /* hook may not be active */ }
+        } catch (error) {
+          await session.evidence.append('api.inventory_hook_gap', { error: error instanceof Error ? error.message : String(error) }, { contextId });
+        }
       }
       // Build inventory
       const domains = new Map<string, Array<{ path: string; methods: string[]; resourceTypes: string[]; lastStatus?: number }>>();
@@ -220,24 +366,39 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
     }),
 
     entry('wxmp_replay_request', 'Replay an indexed request inside the WMPF runtime with optional overrides.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), request_id: stringProp('Indexed requestId.'), url: stringProp('Optional URL override.'), method: stringProp('Optional method override.'), headers: { type: 'object', additionalProperties: { type: 'string' } }, body: stringProp('Optional body override.') }, ['session_id', 'request_id']), async (args) => {
-      const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId); const original = session.channel.requests.get(text(args, 'request_id')); if (!original) throw new Error('REQUEST_NOT_FOUND');
+      const sessionId = text(args, 'session_id'); const session = app.sessions.get(sessionId); const requestId = text(args, 'request_id'); const original = session.channel.requests.get(requestId); if (!original) throw new WxmpError('REQUEST_NOT_FOUND', `Unknown request: ${requestId}`, { sessionId, requestId });
       const request = { url: optionalText(args, 'url') ?? original.url, method: optionalText(args, 'method') ?? original.method, headers: (args.headers ?? original.requestHeaders) as Record<string, string>, body: args.body === undefined ? original.postData : String(args.body) };
-      const response = await session.channel.send('Runtime.evaluate', { expression: buildReplayExpression(request), awaitPromise: true, returnByValue: true }, contextId, 30_000); await session.evidence.append('active.request_replay', request, { contextId, operation: 'replay_request' }); return result(response);
+      const replayContextId = original.contextId ?? app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
+      if (!replayContextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The request is not associated with a runtime context and no context is selected', { sessionId, requestId });
+      const response = await session.channel.send('Runtime.evaluate', { expression: buildReplayExpression(request), awaitPromise: true, returnByValue: true }, replayContextId, 30_000);
+      const value = runtimeValue(response, 'request replay');
+      let outputValue = value;
+      let outputResponse = response;
+      if (value && typeof value === 'object' && typeof (value as Record<string, unknown>).body === 'string') {
+        const body = (value as Record<string, unknown>).body as string;
+        if (body.length > 200_000) {
+          const artifactPath = await session.evidence.writeText(`replay-${safeFile(requestId)}-${Date.now()}.txt`, body);
+          outputValue = { ...(value as Record<string, unknown>), body: body.slice(0, 4000), bodyLength: body.length, artifactPath, truncated: true };
+          outputResponse = replaceRemoteValue(response, outputValue);
+        }
+      }
+      await session.evidence.append('active.request_replay', { request, result: outputValue }, { contextId: replayContextId, operation: 'replay_request' });
+      return result({ response: outputResponse, value: outputValue, contextId: replayContextId });
     }),
 
     // -- wx API & cloud --
     entry('wxmp_call_wx_api', 'Invoke a wx.* API in the selected runtime context.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), api: stringProp('API name without wx. prefix.'), options: { type: 'object', additionalProperties: true } }, ['session_id', 'api']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId); const api = text(args, 'api').replace(/^wx\./, ''); const options = args.options ?? {};
-      const response = await session.channel.send('Runtime.evaluate', { expression: buildWxApiExpression(api, options), awaitPromise: true, returnByValue: true }, contextId, 30_000); await session.evidence.append('active.wx_api', { api, options }, { contextId, operation: `wx.${api}` }); return result(response);
+      const response = await session.channel.send('Runtime.evaluate', { expression: buildWxApiExpression(api, options), awaitPromise: true, returnByValue: true }, contextId, 30_000); const value = runtimeValue(response, `wx.${api}`); await session.evidence.append('active.wx_api', { api, options, result: value }, { contextId, operation: `wx.${api}` }); return result({ response, value });
     }),
 
     entry('wxmp_call_cloud_function', 'Invoke wx.cloud.callFunction with explicit name and data.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), name: stringProp('Cloud function name.'), data: { type: 'object', additionalProperties: true } }, ['session_id', 'name']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId); const call = { name: text(args, 'name'), data: args.data ?? {} };
-      const response = await session.channel.send('Runtime.evaluate', { expression: buildCloudFunctionExpression(call.name, call.data), awaitPromise: true, returnByValue: true }, contextId, 60_000); await session.evidence.append('active.cloud_function', call, { contextId, operation: 'wx.cloud.callFunction' }); return result(response);
+      const response = await session.channel.send('Runtime.evaluate', { expression: buildCloudFunctionExpression(call.name, call.data), awaitPromise: true, returnByValue: true }, contextId, 60_000); const value = runtimeValue(response, 'wx.cloud.callFunction'); await session.evidence.append('active.cloud_function', { ...call, result: value }, { contextId, operation: 'wx.cloud.callFunction' }); return result({ response, value });
     }),
 
     // -- DevTools proxy --
-    entry('wxmp_devtools_proxy_start', 'Expose a local Chrome DevTools WebSocket proxy for one session.', objectSchema({ session_id: stringProp('Session identifier.'), port: numberProp('Local proxy port.') }, ['session_id']), async (args) => result(await app.sessions.startProxy(text(args, 'session_id'), num(args, 'port', 62000)))),
+    entry('wxmp_devtools_proxy_start', 'Expose a local Chrome DevTools WebSocket proxy for one session.', objectSchema({ session_id: stringProp('Session identifier.'), port: numberProp('Local proxy port.') }, ['session_id']), async (args) => result(await app.sessions.startProxy(text(args, 'session_id'), int(args, 'port', 62000, 1, 65535)))),
 
     entry('wxmp_devtools_proxy_stop', 'Stop the optional DevTools proxy.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => { await app.sessions.stopProxy(text(args, 'session_id')); return result({ stopped: true }); }),
   ];

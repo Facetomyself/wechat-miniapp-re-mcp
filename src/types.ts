@@ -18,6 +18,15 @@ export interface WmpfContext {
   id: string;
   name: string;
   kind: 'miniapp' | 'minigame' | 'unknown';
+  role: 'appservice' | 'webview' | 'minigame' | 'worker' | 'unknown';
+  origin?: string;
+  contextType?: string;
+  envType?: string;
+  href?: string;
+  hasWx?: boolean;
+  hasWxConfig?: boolean;
+  probeConfidence: 'unprobed' | 'low' | 'medium' | 'high';
+  probedAt?: string;
   connectedAt: string;
   capabilities: string[];
 }
@@ -29,6 +38,7 @@ export interface RuntimeCapabilities {
   debugger: boolean;
   network: boolean;
   wxTrace: boolean;
+  requestHook: boolean;
   staticAdapter: boolean;
   minigameDynamic: 'supported' | 'partial' | 'unavailable' | 'unknown';
 }
@@ -91,6 +101,7 @@ export interface EvidenceFinding {
 
 export interface NetworkRecord {
   requestId: string;
+  contextId?: string;
   url: string;
   method: string;
   requestHeaders: Record<string, string>;
@@ -107,6 +118,7 @@ export interface NetworkRecord {
 
 export interface ScriptRecord {
   scriptId: string;
+  contextId?: string;
   url: string;
   executionContextId?: number;
   hash?: string;

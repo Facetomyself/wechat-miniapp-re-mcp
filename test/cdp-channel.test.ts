@@ -26,6 +26,7 @@ test('CDP command/response pairing resolves correctly', async () => {
   const result = await resultPromise;
   assert.deepEqual(result, { id: 1001, result: { value: 2 } });
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -38,6 +39,7 @@ test('CDP timeout rejects when no response arrives', async () => {
   const promise = channel.send('Debugger.stepOver', {}, '', 200);
   await assert.rejects(promise, (error: unknown) => error instanceof Error && error.message.includes('timed out'));
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -53,6 +55,7 @@ test('CDP channel indexes scriptParsed and network events', async () => {
   }), 'ctx-1');
   assert.equal(channel.scripts.size, 1);
   assert.equal(channel.scripts.get('10')?.url, 'https://example.test/app.js');
+  assert.equal(channel.scripts.get('10')?.contextId, 'ctx-1');
 
   channel.handlePayload(JSON.stringify({
     method: 'Network.requestWillBeSent',
@@ -60,6 +63,7 @@ test('CDP channel indexes scriptParsed and network events', async () => {
   }), 'ctx-1');
   assert.equal(channel.requests.size, 1);
   assert.equal(channel.requests.get('r1')?.method, 'POST');
+  assert.equal(channel.requests.get('r1')?.contextId, 'ctx-1');
 
   channel.handlePayload(JSON.stringify({
     method: 'Network.responseReceived',
@@ -67,6 +71,7 @@ test('CDP channel indexes scriptParsed and network events', async () => {
   }), 'ctx-1');
   assert.equal(channel.requests.get('r1')?.response?.status, 200);
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -87,6 +92,7 @@ test('CDP channel tracks paused state', async () => {
   channel.handlePayload(JSON.stringify({ method: 'Debugger.resumed', params: {} }), 'ctx-1');
   assert.equal(channel.lastPaused, null);
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -105,6 +111,7 @@ test('CDP channel extracts trace events from console API calls', async () => {
   assert.equal(events.total, 1);
   assert.deepEqual(events.items[0].data, { kind: 'wx', name: 'request', phase: 'call', payload: [{}] });
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -121,6 +128,7 @@ test('CDP channel close rejects pending commands', async () => {
   channel.close('test reason');
   await assert.rejects(promise, (error: unknown) => error instanceof Error && error.message.includes('test reason'));
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -157,6 +165,7 @@ test('CDP disconnect resets runtime state but preserves context listeners for re
   }), 'ctx-2');
   assert.deepEqual(actions, ['add:1', 'remove:1', 'add:2']);
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -175,6 +184,7 @@ test('CDP channel onRaw forwards events to listeners', async () => {
   channel.handlePayload(JSON.stringify({ method: 'Runtime.executionContextDestroyed', params: {} }), 'ctx-1');
   assert.equal(rawPayloads.length, 1);
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -205,6 +215,7 @@ test('CDP channel tracks execution context creation and destruction', async () =
   }), 'ctx-1');
   assert.equal(channel.contexts.size, 0);
 
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -223,5 +234,28 @@ test('CDP channel detects minigame context kind', async () => {
   }), 'ctx-1');
   assert.equal(kinds[0], 'minigame');
 
+  await evidence.flush();
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('CDP channel rejects duplicate or malformed caller-supplied ids', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
+  const evidence = new EvidenceStore(root, 'fixture', 'session-1');
+  await evidence.init();
+  const channel = new CdpChannel('session-1', evidence, async () => {});
+
+  const pending = channel.sendObject({ id: 2000, method: 'Runtime.enable', params: {} }, '', 10_000);
+  const pendingRejection = assert.rejects(pending);
+  await assert.rejects(
+    channel.sendObject({ id: 2000, method: 'Debugger.enable', params: {} }, '', 200),
+    (error: unknown) => error instanceof Error && error.message.includes('already pending'),
+  );
+  await assert.rejects(
+    channel.sendObject({ id: 'not-a-number', method: 'Runtime.enable', params: {} }),
+    (error: unknown) => error instanceof Error && error.message.includes('positive safe integer'),
+  );
+  channel.disconnect('fixture done');
+  await pendingRejection;
+  await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });
