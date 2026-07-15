@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "description": "Clean-room AOB signature database for WMPF flue.dll hook points. Each entry captures byte patterns around known-good function entry points, usable for cross-version offset discovery via pattern matching.",
+  "source": "Clean-room extracted from WMPF v19977 flue.dll (SHA-256: pending) at known-good hook offsets, verified against WMPFDebugger frida/config/ addresses.19977.json.",
+  "generatedAt": "2026-07-15",
+  "verification": {
+    "wmpfVersion": 19977,
+    "moduleName": "flue.dll",
+    "moduleSize": 210861096,
+    "moduleSha256": "f569e0ddcd622e85fb33a0e2a4c647561fd27440c9612a54140572a42c8cfc7d",
+    "cdpFilterUniqueMatch": 1,
+    "loadStartUniqueMatch": 1,
+    "matchDelta": -32,
+    "status": "clean-room-verified",
+    "reviewedProfile": "data/profiles/clean-room/windows-19977-reviewed.json",
+    "confidence": "high",
+    "verifiedAt": "2026-07-15",
+    "runtimeVerification": "Full CDP chain passed on live WMPF v19977 (attach→evaluate→breakpoint→Network→trace→API inventory→disconnect/reconnect)"
+  },
+  "signatures": {
+    "cdpFilter": {
+      "description": "SendToClientFilter — CDP filter function. Single unique AOB match confirmed in v19977 flue.dll. Hook attaches onLeave, reads input pointer+8, patches value 6→0.",
+      "verifiedVersions": [19977],
+      "aobPre": "85 C9 79 05 4B 8B 44 25 08 4C 8B 6C 24 30 48 85",
+      "aobPost": "38 E9 5E FF FF FF 31 FF EB 5C 4C 8B 7E 08 48 8B",
+      "searchWindow": 64,
+      "adjustment": 32
+    },
+    "loadStart": {
+      "description": "AppletIndexContainer::OnLoadStart — mini-program load entry. Single unique AOB match confirmed in v19977 flue.dll. Hook attaches onEnter, reads rcx→scene chain, patches scene to 1101.",
+      "verifiedVersions": [19977],
+      "aobPre": "64 08 41 B8 01 00 00 00 48 89 C1 E8 90 40 D4 01",
+      "aobPost": "89 D9 E8 69 8E C8 FF 48 8B 13 4C 8B 43 08 48 89",
+      "searchWindow": 64,
+      "adjustment": 32
+    }
+  },
+  "versionProfiles": []
+}
