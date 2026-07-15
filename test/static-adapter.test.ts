@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { StaticAdapter } from '../src/static/adapter.js';
 import type { AppConfig } from '../src/config.js';
+import { WxmpError } from '../src/errors.js';
+
+const BACKEND_FIXTURE = path.resolve('test', 'fixtures', 'gwxapkg-backend.mjs');
 
 function mockConfig(workspaceRoot: string, gwxapkgPath: string | null = null): AppConfig {
   return {
@@ -101,6 +104,112 @@ test('StaticAdapter buildIndex extracts URLs, wx APIs, routes', async () => {
   assert.ok((index.routes as string[]).some((r) => r.includes('pages/detail/detail')));
 
   await fs.rm(root, { recursive: true, force: true });
+});
+
+test('StaticAdapter decompile runs a backend subprocess and closes the static analysis loop', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-static-subprocess-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const inputPath = path.join(root, 'input', 'fixture.wxapkg');
+  await fs.mkdir(path.dirname(inputPath), { recursive: true });
+  await fs.writeFile(inputPath, 'runtime-only fixture package', 'utf8');
+
+  const adapter = new StaticAdapter(mockConfig(root, BACKEND_FIXTURE));
+  const result = await adapter.decompile({
+    inputPath,
+    projectName: 'subprocess-fixture',
+    appId: 'wxfixture123',
+    outputName: 'decompiled',
+  });
+  const outputPath = result.outputPath as string;
+  const invocation = JSON.parse(result.stdout as string) as Record<string, unknown>;
+
+  assert.equal(result.ok, true);
+  assert.equal(result.appId, 'wxfixture123');
+  assert.equal(invocation.mode, 'decompile');
+  assert.equal(invocation.inputPath, path.resolve(inputPath));
+  assert.equal(invocation.outputPath, outputPath);
+  assert.equal(invocation.appId, 'wxfixture123');
+  assert.deepEqual(invocation.args, result.args);
+  assert.match(await fs.readFile(path.join(outputPath, 'app.js'), 'utf8'), /wx\.request/);
+
+  const search = await adapter.search(outputPath, 'fixture.example.test');
+  assert.equal(search.count, 1);
+  const index = await adapter.buildIndex(outputPath, 'subprocess-fixture');
+  assert.deepEqual(index.urls, ['https://fixture.example.test/v1/data']);
+  assert.ok((index.wxApis as string[]).includes('request'));
+  assert.ok((index.wxApis as string[]).includes('setStorage'));
+  assert.ok((index.routes as string[]).includes('/pages/detail/detail'));
+  assert.ok((index.fileCount as number) >= 4);
+});
+
+test('StaticAdapter repack runs the backend subprocess and requires a non-empty package', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-static-subprocess-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const inputPath = path.join(root, 'restored');
+  await fs.mkdir(inputPath, { recursive: true });
+  await fs.writeFile(path.join(inputPath, 'app.js'), 'App({});\n', 'utf8');
+
+  const adapter = new StaticAdapter(mockConfig(root, BACKEND_FIXTURE));
+  const result = await adapter.repack({
+    inputPath,
+    projectName: 'subprocess-fixture',
+    outputName: 'fixture-repacked.wxapkg',
+  });
+  const outputPath = result.outputPath as string;
+  const invocation = JSON.parse(result.stdout as string) as Record<string, unknown>;
+  const output = await fs.readFile(outputPath, 'utf8');
+
+  assert.equal(invocation.mode, 'repack');
+  assert.equal(invocation.inputPath, path.resolve(inputPath));
+  assert.equal(invocation.outputPath, outputPath);
+  assert.match(output, /^WXAPKG_FIXTURE\n/);
+});
+
+test('StaticAdapter maps backend subprocess failures to STATIC_ADAPTER_FAILED', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-static-subprocess-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const inputPath = path.join(root, 'fixture.wxapkg');
+  await fs.writeFile(inputPath, 'runtime-only fixture package', 'utf8');
+  const adapter = new StaticAdapter(mockConfig(root, BACKEND_FIXTURE));
+
+  await assert.rejects(
+    () => adapter.decompile({
+      inputPath,
+      projectName: 'subprocess-failure',
+      outputName: 'failed',
+      extraArgs: ['--fixture-fail'],
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof WxmpError);
+      assert.equal(error.code, 'STATIC_ADAPTER_FAILED');
+      assert.equal(error.details.code, 23);
+      assert.match(String(error.details.stderr), /controlled fixture backend failure/);
+      return true;
+    },
+  );
+});
+
+test('StaticAdapter rejects successful subprocesses that produce no output', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-static-subprocess-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const inputPath = path.join(root, 'fixture.wxapkg');
+  await fs.writeFile(inputPath, 'runtime-only fixture package', 'utf8');
+  const adapter = new StaticAdapter(mockConfig(root, BACKEND_FIXTURE));
+
+  await assert.rejects(
+    () => adapter.decompile({
+      inputPath,
+      projectName: 'subprocess-no-output',
+      outputName: 'empty',
+      extraArgs: ['--fixture-no-output'],
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof WxmpError);
+      assert.equal(error.code, 'STATIC_ADAPTER_NO_OUTPUT');
+      assert.match(String(error.details.stdout), /\"noOutput\":true/);
+      return true;
+    },
+  );
 });
 
 test('StaticAdapter decompile requires backend and rejects missing executable', async () => {
