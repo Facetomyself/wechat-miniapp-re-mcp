@@ -61,6 +61,10 @@ WMPF hardcodes its debug endpoint as `ws://127.0.0.1:9421` (confirmed from First
 
 The WMPF `publicLib.wxapkg` (shared library package) cannot be decompiled by Gwxapkg as a standalone package. It requires the main package context for proper extraction. The adapter correctly reports this as an empty-output error.
 
+## Cross-platform Static Backend Fixtures
+
+Static adapter tests need to cross the real child-process boundary; mocking `execFile` misses command construction, Windows process behavior, exit-code capture, and output verification. A plain Node `.mjs` backend launched through `process.execPath` is stable across the Node.js 20/22 CI matrix and avoids shell or `.cmd` wrapper semantics. The fixture creates its package input and all outputs in an OS temporary directory, then validates decompile, search/index, repack, non-zero exit, and no-output behavior without adding package artifacts to Git.
+
 ## Mini-game Process Visibility
 
 Mini-game JS contexts are embedded within `preload-*` renderer processes and do not appear as separate `WeChatAppEx.exe` processes with distinct appIds in `--wmpf-appid=`. Context detection relies on `Runtime.executionContextCreated` CDP events (implemented in `cdp-channel.ts`).

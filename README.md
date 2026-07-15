@@ -32,6 +32,8 @@ Project tracking:
 & "D:\reverse_ENV\tools\node\npm.cmd" run check
 ```
 
+The check gate uses a controlled Node backend fixture to exercise the real static `execFile` decompile/repack subprocess path on Node.js 20 and 22. Package inputs, restored files, and repacked `.wxapkg` outputs are generated below the OS temporary directory at test time; no package fixture is committed.
+
 Start the server:
 
 ```powershell

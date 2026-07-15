@@ -9,6 +9,7 @@ import { resolveInside, safeProjectName } from '../security.js';
 
 const execFileAsync = promisify(execFile);
 const TEXT_EXTENSIONS = new Set(['.js', '.json', '.wxml', '.wxss', '.wxs', '.html', '.css', '.ts', '.txt', '.md']);
+const NODE_SCRIPT_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
 
 export interface PackageRecord {
   appId: string;
@@ -193,8 +194,11 @@ export class StaticAdapter {
   }
 
   private async run(executable: string, args: string[]): Promise<Record<string, unknown>> {
+    const isNodeScript = NODE_SCRIPT_EXTENSIONS.has(path.extname(executable).toLowerCase());
+    const command = isNodeScript ? process.execPath : executable;
+    const commandArgs = isNodeScript ? [executable, ...args] : args;
     try {
-      const { stdout, stderr } = await execFileAsync(executable, args, {
+      const { stdout, stderr } = await execFileAsync(command, commandArgs, {
         windowsHide: true,
         maxBuffer: 64 * 1024 * 1024,
         timeout: 10 * 60 * 1000,
