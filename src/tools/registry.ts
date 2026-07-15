@@ -4,6 +4,7 @@ import { WxmpApp } from '../app.js';
 import { WxmpError } from '../errors.js';
 import { buildTraceScript } from '../runtime/trace-script.js';
 import { buildCloudFunctionExpression, buildReplayExpression, buildWxApiExpression } from '../runtime/expressions.js';
+import { buildWxRequestHookSource } from '../runtime/wx-request-hook.js';
 import { SignatureSpec } from '../runtime/profile.js';
 import { resolveInside, safeProjectName } from '../security.js';
 import { ToolEntry } from './types.js';
@@ -206,6 +207,39 @@ export function buildTools(app: WxmpApp): ToolEntry[] {
     const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
     const response = await session.channel.send('Runtime.evaluate', { expression: 'globalThis.__wxmpTrace?.stop?.() ?? {restored:false}', returnByValue: true }, contextId);
     session.channel.traceActive = false; await session.evidence.append('trace.stopped', {}, { contextId, operation: 'trace_stop' }); return result(response);
+  }));
+
+  // Non-CDP wx.request / fetch / XHR hooks (independent of Network domain)
+  tools.push(entry('wxmp_hook_wx_request', 'Inject non-destructive wrappers around wx.request, fetch, and XMLHttpRequest in the appservice context. Captures full request/response bodies and JavaScript call stacks independently of the CDP Network domain.', objectSchema({
+    session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'),
+  }, ['session_id']), async (args) => {
+    const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
+    const response = await session.channel.send('Runtime.evaluate', {
+      expression: buildWxRequestHookSource(), awaitPromise: true, returnByValue: true,
+    }, contextId);
+    await session.evidence.append('active.wx_request_hook', response, { contextId, operation: 'wxmp_hook_wx_request' });
+    return result(response);
+  }));
+
+  tools.push(entry('wxmp_get_hooked_requests', 'Read captured wx.request, fetch, and XHR records drained from an active request hook, including response bodies and JS call stacks.', objectSchema({
+    session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'),
+  }, ['session_id']), async (args) => {
+    const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
+    const response = await session.channel.send('Runtime.evaluate', {
+      expression: 'globalThis.__wxmpRequestHook ? globalThis.__wxmpRequestHook.drain() : []', awaitPromise: true, returnByValue: true,
+    }, contextId);
+    return result(response);
+  }));
+
+  tools.push(entry('wxmp_unhook_wx_request', 'Restore original wx.request, fetch, and XMLHttpRequest and release the hook buffer.', objectSchema({
+    session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'),
+  }, ['session_id']), async (args) => {
+    const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId);
+    const response = await session.channel.send('Runtime.evaluate', {
+      expression: 'globalThis.__wxmpRequestHook?.stop?.() ?? {restored:false}', returnByValue: true,
+    }, contextId);
+    await session.evidence.append('active.wx_request_unhook', response, { contextId, operation: 'wxmp_unhook_wx_request' });
+    return result(response);
   }));
 
   tools.push(entry('wxmp_capture_start', 'Enable the CDP Network domain and begin request indexing.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), max_total_buffer_size: numberProp('CDP network buffer size.') }, ['session_id']), async (args) => { const { sessionId, contextId } = sessionContext(app, args); return result(await app.sessions.get(sessionId).channel.send('Network.enable', { maxTotalBufferSize: num(args, 'max_total_buffer_size', 100_000_000) }, contextId)); }));

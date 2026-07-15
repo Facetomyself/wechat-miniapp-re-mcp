@@ -23,22 +23,35 @@ function safePointer(address) {
 function patchCdpFilter(base) {
   const target = base.add(ptr(PROFILE.cdpFilterOffset));
   Interceptor.attach(target, {
-    onEnter(args) { this.output = args[0]; },
-    onLeave(retval) {
+    onEnter(args) { this.inputValue = args[0]; },
+    onLeave() {
       try {
-        let objectPointer = null;
-        if (Process.platform === 'windows') objectPointer = safePointer(this.output);
-        else if (retval && !retval.isNull()) objectPointer = retval;
-        if (!objectPointer) return;
-        const flag = objectPointer.add(8);
+        const ptrValue = safeReadPointer(this.inputValue);
+        if (!ptrValue) return;
+        const flag = ptrValue.add(8);
+        if (flag.isNull()) return;
         const current = flag.readU32();
-        if (current === 6) flag.writeU32(0);
+        if (current === 6) {
+          flag.writeU32(0);
+          emit('cdp_filter_patched', { previous: current });
+        }
       } catch (error) {
         emit('cdp_filter_error', String(error));
       }
     }
   });
   emit('cdp_filter_attached', { address: target.toString() });
+}
+
+function safeReadPointer(address) {
+  try {
+    if (!address || address.isNull()) return null;
+    const value = address.readPointer();
+    if (!value || value.isNull()) return null;
+    return value;
+  } catch (_) {
+    return null;
+  }
 }
 
 function resolveScenePointer(root) {
