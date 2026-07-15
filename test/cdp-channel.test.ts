@@ -75,6 +75,28 @@ test('CDP channel indexes scriptParsed and network events', async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test('CDP channel normalizes empty WMPF event context ids as unscoped', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
+  const evidence = new EvidenceStore(root, 'fixture', 'session-1');
+  await evidence.init();
+  const channel = new CdpChannel('session-1', evidence, async () => {});
+
+  channel.handlePayload(JSON.stringify({
+    method: 'Debugger.scriptParsed',
+    params: { scriptId: 'unscoped-script', url: 'wxmp://fixture.js' },
+  }), '');
+  channel.handlePayload(JSON.stringify({
+    method: 'Network.requestWillBeSent',
+    params: { requestId: 'unscoped-request', request: { url: 'https://fixture.test', method: 'GET', headers: {} } },
+  }), '');
+
+  assert.equal(channel.scripts.get('unscoped-script')?.contextId, undefined);
+  assert.equal(channel.requests.get('unscoped-request')?.contextId, undefined);
+
+  await evidence.flush();
+  await fs.rm(root, { recursive: true, force: true });
+});
+
 test('CDP channel tracks paused state', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
   const evidence = new EvidenceStore(root, 'fixture', 'session-1');

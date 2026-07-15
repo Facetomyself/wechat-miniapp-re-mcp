@@ -16,7 +16,7 @@ All tools use the `wxmp_*` prefix. Dynamic tools require `session_id`; tools tha
 - `wxmp_probe_contexts`
 - `wxmp_get_runtime_info`
 
-`wxmp_probe_contexts` evaluates a small metadata probe in every observed context, records `role`, `contextType`, `envType`, `hasWx`, and probe confidence, then selects the strongest AppService/wx-capable context. Context capability lists are evidence-backed; a connected socket alone does not imply debugger, network, or trace support.
+`wxmp_probe_contexts` evaluates a small metadata probe in every observed context, resolves `wx` from the global object or an accessible PC WMPF frame such as `nav.wxFrame`, records `role`, `contextType`, `envType`, `hasWx`, `hasWxRequest`, `wxRuntimePath`, and probe confidence, then selects the strongest AppService/wx-capable context. Context capability lists are evidence-backed; a connected socket alone does not imply debugger, network, or trace support.
 
 ## Runtime and source debugging
 
@@ -51,7 +51,7 @@ All tools use the `wxmp_*` prefix. Dynamic tools require `session_id`; tools tha
 - `wxmp_call_wx_api`
 - `wxmp_call_cloud_function`
 
-Trace start requires at least one wrapped `wx.*` method; `wrapped=0` returns `TRACE_TARGET_UNAVAILABLE`. The request hook supports `wx.request`, `fetch`, and `XMLHttpRequest` and retains bounded body previews plus call stacks. Script and request indexes retain their WMPF `contextId`; source retrieval, breakpoint-by-script, response-body retrieval, and replay default to the originating context.
+Trace start requires at least one wrapped `wx.*` method; `wrapped=0` returns `TRACE_TARGET_UNAVAILABLE`. The request hook supports `wx.request`, `fetch`, and `XMLHttpRequest` and retains bounded body previews plus call stacks. Script and request indexes retain their WMPF `contextId` when the runtime supplies one; source retrieval, breakpoint-by-script, response-body retrieval, and replay use the originating context or fall back to the selected context for unscoped WMPF events.
 
 Breakpoint-by-URL results expose `boundLocations` and `pending`. An empty location list means the breakpoint is waiting for a matching future script, not that binding has already been verified.
 

@@ -1,8 +1,12 @@
+import { WX_RUNTIME_RESOLVER_SOURCE } from './wx-runtime.js';
+
 export function buildTraceScript(categories: string[]): string {
   const selected = JSON.stringify(categories);
   return `(() => {
     const root = globalThis;
     if (root.__wxmpTrace && root.__wxmpTrace.active) return { ok: true, reused: true };
+    ${WX_RUNTIME_RESOLVER_SOURCE}
+    const runtime = __wxmpResolveRuntime();
     const selected = new Set(${selected});
     const originals = [];
     const emit = (kind, name, phase, payload) => {
@@ -33,7 +37,7 @@ export function buildTraceScript(categories: string[]): string {
       originals.push([object, key, original]);
       object[key] = wrapped;
     };
-    const wxObject = root.wx;
+    const wxObject = runtime.wx;
     if (wxObject) {
       const keys = Object.keys(wxObject);
       for (const key of keys) {
@@ -56,6 +60,6 @@ export function buildTraceScript(categories: string[]): string {
         return { restored: true };
       }
     };
-    return { ok: true, wrapped: originals.length, categories: Array.from(selected) };
+    return { ok: true, wrapped: originals.length, categories: Array.from(selected), wxRuntimePath: runtime.path };
   })()`;
 }

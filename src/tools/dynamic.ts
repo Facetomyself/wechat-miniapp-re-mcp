@@ -82,12 +82,14 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
     entry('wxmp_list_scripts', 'List scripts reported by Debugger.scriptParsed.', objectSchema({
       session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context filter.'), offset: numberProp('Pagination offset.'), limit: numberProp('Page size.'), url_filter: stringProp('Optional URL substring.'),
     }, ['session_id']), async (args) => {
-      const session = app.sessions.get(text(args, 'session_id'));
-      await session.channel.send('Debugger.enable').catch(() => undefined);
+      const sessionId = text(args, 'session_id');
+      const session = app.sessions.get(sessionId);
       const filter = optionalText(args, 'url_filter')?.toLowerCase();
       const contextId = optionalText(args, 'context_id');
+      const selectedContextId = app.sessions.contextId(sessionId, contextId);
+      await session.channel.send('Debugger.enable', {}, selectedContextId).catch(() => undefined);
       const all = [...session.channel.scripts.values()].filter((s) => (
-        (!filter || s.url.toLowerCase().includes(filter)) && (!contextId || s.contextId === contextId)
+        (!filter || s.url.toLowerCase().includes(filter)) && (!contextId || !s.contextId || s.contextId === contextId)
       ));
       const offset = int(args, 'offset', 0, 0); const limit = int(args, 'limit', 100, 1, 500);
       return result({ total: all.length, items: all.slice(offset, offset + limit) });
@@ -98,7 +100,7 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
     }, ['session_id', 'script_id']), async (args) => {
       const sessionId = text(args, 'session_id'); const session = app.sessions.get(sessionId); const scriptId = text(args, 'script_id');
       const selectedContextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
-      const contextId = session.channel.scripts.get(scriptId)?.contextId ?? selectedContextId;
+      const contextId = session.channel.scripts.get(scriptId)?.contextId || selectedContextId;
       if (!contextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The script is not associated with a runtime context and no context is selected', { sessionId, scriptId });
       const response = await session.channel.send('Debugger.getScriptSource', { scriptId }, contextId);
       const source = String(((response.result ?? {}) as Record<string, unknown>).scriptSource ?? '');
@@ -120,8 +122,8 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
       }
       const maxScripts = int(args, 'max_scripts', 100, 1, 500); const maxResults = int(args, 'max_results', 200, 1, 5000);
       const matches: Array<Record<string, unknown>> = [];
-      for (const script of [...session.channel.scripts.values()].filter((item) => !contextId || item.contextId === contextId).slice(0, maxScripts)) {
-        const response = await session.channel.send('Debugger.getScriptSource', { scriptId: script.scriptId }, contextId).catch(() => null);
+      for (const script of [...session.channel.scripts.values()].filter((item) => !contextId || !item.contextId || item.contextId === contextId).slice(0, maxScripts)) {
+        const response = await session.channel.send('Debugger.getScriptSource', { scriptId: script.scriptId }, script.contextId || contextId).catch(() => null);
         if (!response) continue;
         const source = String((((response.result ?? {}) as Record<string, unknown>).scriptSource) ?? '');
         const lines = source.split(/\r?\n/);
@@ -141,7 +143,7 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
       const urlRegex = optionalText(args, 'url_regex');
       if (!scriptId && !url && !urlRegex) throw new WxmpError('INVALID_ARGUMENT', 'Provide script_id, url, or url_regex for the breakpoint');
       const selectedContextId = app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
-      const contextId = scriptId ? channel.scripts.get(scriptId)?.contextId ?? selectedContextId : selectedContextId;
+      const contextId = scriptId ? channel.scripts.get(scriptId)?.contextId || selectedContextId : selectedContextId;
       if (!contextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The breakpoint target is not associated with a runtime context and no context is selected', { sessionId, scriptId });
       const response = scriptId
         ? await channel.send('Debugger.setBreakpoint', { location: { scriptId, lineNumber: int(args, 'line_number', undefined, 0), columnNumber: int(args, 'column_number', 0, 0) }, condition: optionalText(args, 'condition') ?? '' }, contextId)
@@ -270,14 +272,14 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
 
     entry('wxmp_list_requests', 'List indexed network requests.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context filter.'), offset: numberProp('Offset.'), limit: numberProp('Limit.'), url_filter: stringProp('URL substring.') }, ['session_id']), async (args) => {
       const session = app.sessions.get(text(args, 'session_id')); const filter = optionalText(args, 'url_filter')?.toLowerCase(); const contextId = optionalText(args, 'context_id');
-      const all = [...session.channel.requests.values()].filter((r) => (!filter || r.url.toLowerCase().includes(filter)) && (!contextId || r.contextId === contextId)); const offset = int(args, 'offset', 0, 0); const limit = int(args, 'limit', 100, 1, 500);
+      const all = [...session.channel.requests.values()].filter((r) => (!filter || r.url.toLowerCase().includes(filter)) && (!contextId || !r.contextId || r.contextId === contextId)); const offset = int(args, 'offset', 0, 0); const limit = int(args, 'limit', 100, 1, 500);
       return result({ total: all.length, items: all.slice(offset, offset + limit).map((request) => previewRequest(request)) });
     }),
 
     entry('wxmp_get_request', 'Get one indexed request and optionally fetch its response body.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), request_id: stringProp('CDP requestId.'), include_body: booleanProp('Fetch response body.') }, ['session_id', 'request_id']), async (args) => {
       const sessionId = text(args, 'session_id'); const session = app.sessions.get(sessionId); const requestId = text(args, 'request_id'); const request = session.channel.requests.get(requestId);
       if (!request) throw new WxmpError('REQUEST_NOT_FOUND', `Unknown request: ${requestId}`, { sessionId, requestId });
-      const requestContextId = request.contextId ?? app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
+      const requestContextId = request.contextId || app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
       if (!requestContextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The request is not associated with a runtime context and no context is selected', { sessionId, requestId });
       let body: unknown; if (bool(args, 'include_body')) body = await session.channel.send('Network.getResponseBody', { requestId }, requestContextId).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
       if (body && typeof body === 'object') {
@@ -368,7 +370,7 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
     entry('wxmp_replay_request', 'Replay an indexed request inside the WMPF runtime with optional overrides.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), request_id: stringProp('Indexed requestId.'), url: stringProp('Optional URL override.'), method: stringProp('Optional method override.'), headers: { type: 'object', additionalProperties: { type: 'string' } }, body: stringProp('Optional body override.') }, ['session_id', 'request_id']), async (args) => {
       const sessionId = text(args, 'session_id'); const session = app.sessions.get(sessionId); const requestId = text(args, 'request_id'); const original = session.channel.requests.get(requestId); if (!original) throw new WxmpError('REQUEST_NOT_FOUND', `Unknown request: ${requestId}`, { sessionId, requestId });
       const request = { url: optionalText(args, 'url') ?? original.url, method: optionalText(args, 'method') ?? original.method, headers: (args.headers ?? original.requestHeaders) as Record<string, string>, body: args.body === undefined ? original.postData : String(args.body) };
-      const replayContextId = original.contextId ?? app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
+      const replayContextId = original.contextId || app.sessions.contextId(sessionId, optionalText(args, 'context_id'));
       if (!replayContextId) throw new WxmpError('CONTEXT_NOT_SELECTED', 'The request is not associated with a runtime context and no context is selected', { sessionId, requestId });
       const response = await session.channel.send('Runtime.evaluate', { expression: buildReplayExpression(request), awaitPromise: true, returnByValue: true }, replayContextId, 30_000);
       const value = runtimeValue(response, 'request replay');

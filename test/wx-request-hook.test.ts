@@ -49,3 +49,27 @@ test('request hook installs and restores wx.request, fetch, and XMLHttpRequest',
   const restored = vm.runInContext('globalThis.__wxmpRequestHook.stop()', sandbox) as { installed: string[] };
   assert.deepEqual(Array.from(restored.installed), ['wx.request', 'fetch', 'XMLHttpRequest']);
 });
+
+test('request hook resolves wx.request from nav.wxFrame', () => {
+  const wxFrame = {
+    __wxConfig: { pages: ['pages/index/index'] },
+    getCurrentPages: () => [],
+    wx: {
+      request(options: { success?: (value: unknown) => void }) {
+        options.success?.({ statusCode: 204, data: '', header: {} });
+        return { abort() {} };
+      },
+    },
+  };
+  const sandbox = { nav: { wxFrame }, console: { debug() {} } };
+  vm.createContext(sandbox);
+  const installed = vm.runInContext(buildWxRequestHookSource(), sandbox) as { installed: string[]; wrapped: number; wxRuntimePath: string };
+  assert.deepEqual(Array.from(installed.installed), ['wx.request']);
+  assert.equal(installed.wrapped, 1);
+  assert.equal(installed.wxRuntimePath, 'globalThis.nav.wxFrame');
+  vm.runInContext('nav.wxFrame.wx.request({ url: "https://fixture.test" })', sandbox);
+  const records = vm.runInContext('globalThis.__wxmpRequestHook.drain()', sandbox) as Array<{ type: string; response: { status: number } }>;
+  assert.equal(records.length, 1);
+  assert.equal(records[0].type, 'wx.request');
+  assert.equal(records[0].response.status, 204);
+});
