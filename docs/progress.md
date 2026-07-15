@@ -7,7 +7,7 @@ Current working state:
 - Child branch: `main`
 - Package version: `0.3.1`
 - Repository visibility: `public` after a working-tree, reachable-history, pull-request, and Actions-log sensitive-data audit.
-- v0.3.0 remediation is delivered through PR #6; v0.3.1 closes the repeatable WMPF v19977 semantic gate through PR #7; WMPF v20079 profile/AOB/hash-binding closure is delivered through PR #11. Parent gitlink/public-status synchronization is the current parent-repository follow-up.
+- v0.3.0 remediation is delivered through PR #6; v0.3.1 closes the repeatable WMPF v19977 semantic gate through PR #7; WMPF v20079 profile/AOB/hash-binding closure is delivered through PR #11; public delivery status is recorded by PR #12. Parent gitlink/public-status synchronization is merged through `reverse_ENV` PR #6.
 - Overall implementation completion: about 98%.
 - Original acceptance completion: about 96%.
 
@@ -54,7 +54,7 @@ The project is not marked 100% complete. Transport connectivity, tool invocation
 
 - The current working tree and every reachable Git blob were scanned for credential formats, private-key material, credential-bearing URLs, sensitive filenames, forbidden binary/package extensions, and files larger than 5 MiB; no findings were produced.
 - All 10 pull-request titles/bodies and their comment/review collections were checked; no credential-pattern findings were produced.
-- All 30 GitHub Actions runs through the PR #11 merge were checked. Logs exposed only GitHub-masked `***` authentication fields; no raw credential pattern was observed.
+- All 32 GitHub Actions runs through the PR #12 merge were checked. Logs exposed only GitHub-masked `***` authentication fields; no raw credential pattern was observed.
 - `package.json` keeps `"private": true` as an npm publication guard. It does not describe GitHub visibility.
 
 ## Phase status
@@ -66,8 +66,8 @@ The project is not marked 100% complete. Transport connectivity, tool invocation
 | 2. Dynamic reverse workflow | v19977 acceptance complete | 98% | AppService selection, evaluate, bound breakpoint, trace/hook events, inventory, Network body, replay, reconnect, detach, evidence export; v20079 hook attach/detach passed | Repeat the full mini-program semantic gate on v20079 or another second WMPF version |
 | 3. Static reverse workflow | Acceptance complete | 100% | prior main/plugin/subpackage/minigame evidence plus reproducible backend subprocess decompile/search/index/repack and failure/no-output gates | — |
 | 4. Profile lifecycle | Complete | 100% | canonical v19977/v20079 reviewed profiles, per-module SHA-256 binding, unique cross-version AOB matches, candidate review gate, v20079 production attach/detach | — |
-| 5. Parent integration | In progress | 90% | `reverse_ENV` PR #3 delivered v0.3.1 integration | Update the parent gitlink and Public/cross-version status for PR #11 |
-| 6. Git delivery | Complete | 100% | PR #6 carries v0.3.0; PR #7 carries v0.3.1; PR #11 carries WMPF v20079 profile/AOB/hash-binding closure and the public-release audit | — |
+| 5. Parent integration | Complete | 100% | `reverse_ENV` PR #6 advances the gitlink to child `7504046` and records Public/cross-version/workspace governance status | — |
+| 6. Git delivery | Complete | 100% | PR #6 carries v0.3.0; PR #7 carries v0.3.1; PR #11 carries WMPF v20079 profile/AOB/hash-binding closure; PR #12 records public delivery; parent integration is merged through `reverse_ENV` PR #6 | — |
 
 ## Automated verification
 
