@@ -2,9 +2,10 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WxmpApp } from './app.js';
 import { createServer } from './server.js';
+import { VERSION } from './version.js';
 
 async function main(): Promise<void> {
-  console.error('[wxmp] starting wechat-miniapp-re-mcp v0.1.0');
+  console.error(`[wxmp] starting wechat-miniapp-re-mcp v${VERSION}`);
   console.error('[wxmp] mode=stdio target-attach=lazy');
   const app = new WxmpApp();
   const server = createServer(app);

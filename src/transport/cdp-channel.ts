@@ -173,12 +173,24 @@ export class CdpChannel {
     return () => this.contextListeners.delete(listener);
   }
 
-  close(reason = 'session closed'): void {
+  disconnect(reason = 'runtime disconnected'): void {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(new WxmpError('SESSION_DISCONNECTED', reason, { id }));
     }
     this.pending.clear();
+    for (const context of this.contexts.values()) {
+      for (const listener of this.contextListeners) listener('remove', { id: context.id, name: context.name, kind: context.kind });
+    }
+    this.contexts.clear();
+    this.scripts.clear();
+    this.requests.clear();
+    this.lastPaused = null;
+    this.traceActive = false;
+  }
+
+  close(reason = 'session closed'): void {
+    this.disconnect(reason);
     this.rawListeners.clear();
     this.contextListeners.clear();
   }

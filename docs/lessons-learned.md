@@ -41,6 +41,14 @@ For reliable MCP attach:
 - Consider a `wxmp_force_debug` tool that actively triggers the filter via direct function call after Frida injection
 - Profile the filter call frequency across different WMPF versions
 
+### Implemented Recovery Behavior in v0.2.0
+
+- An unexpected WMPF socket close keeps the MCP session and Frida attachment alive.
+- The bridge requeues the same session as the only eligible runtime owner.
+- Ephemeral contexts, scripts, requests, pause state, and pending CDP commands are reset; listeners and evidence state survive.
+- `wxmp_wait_for_runtime` waits for a later lifecycle-triggered connection without reinjecting Frida.
+- A second concurrent runtime reservation returns `BRIDGE_SESSION_BUSY`; FIFO guessing is no longer used across sessions.
+
 ## WMPF WebSocket URL
 
 WMPF hardcodes its debug endpoint as `ws://127.0.0.1:9421` (confirmed from First tool source: `src/cli.py` line 5: `DEBUG_PORT = 9421`). This port cannot be changed without patching the WMPF binary.

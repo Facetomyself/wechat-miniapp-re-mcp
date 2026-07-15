@@ -124,6 +124,42 @@ test('CDP channel close rejects pending commands', async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+test('CDP disconnect resets runtime state but preserves context listeners for reconnect', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
+  const evidence = new EvidenceStore(root, 'fixture', 'session-1');
+  await evidence.init();
+  const channel = new CdpChannel('session-1', evidence, async () => {});
+  const actions: string[] = [];
+  channel.onContext((action, context) => actions.push(`${action}:${context.id}`));
+
+  channel.handlePayload(JSON.stringify({
+    method: 'Runtime.executionContextCreated',
+    params: { context: { id: '1', name: 'AppContext', origin: 'https://servicewechat.com' } },
+  }), 'ctx-1');
+  channel.handlePayload(JSON.stringify({
+    method: 'Debugger.scriptParsed',
+    params: { scriptId: '10', url: 'https://example.test/app.js' },
+  }), 'ctx-1');
+  channel.handlePayload(JSON.stringify({
+    method: 'Network.requestWillBeSent',
+    params: { requestId: 'r1', request: { url: 'https://api.test/data', method: 'GET' } },
+  }), 'ctx-1');
+
+  channel.disconnect('fixture disconnect');
+  assert.equal(channel.contexts.size, 0);
+  assert.equal(channel.scripts.size, 0);
+  assert.equal(channel.requests.size, 0);
+  assert.deepEqual(actions, ['add:1', 'remove:1']);
+
+  channel.handlePayload(JSON.stringify({
+    method: 'Runtime.executionContextCreated',
+    params: { context: { id: '2', name: 'AppContext', origin: 'https://servicewechat.com' } },
+  }), 'ctx-2');
+  assert.deepEqual(actions, ['add:1', 'remove:1', 'add:2']);
+
+  await fs.rm(root, { recursive: true, force: true });
+});
+
 test('CDP channel onRaw forwards events to listeners', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
   const evidence = new EvidenceStore(root, 'fixture', 'session-1');

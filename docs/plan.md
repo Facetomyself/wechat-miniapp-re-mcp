@@ -11,7 +11,7 @@ Deliver a lightweight, reverse-engineering focused MCP server for PC WeChat WMPF
 - Runtime: TypeScript, project Node.js, `@modelcontextprotocol/sdk`.
 - MCP prefix: `wxmp_*`.
 - Platform: Windows complete first; macOS remains an adapter boundary.
-- Session model: explicit `session_id`; context-sensitive calls also accept `context_id`.
+- Session model: explicit `session_id`; context-sensitive calls also accept `context_id`. Historical sessions remain isolated, while the handshake-free shared WMPF bridge allows one active/pending runtime owner and rejects concurrent ownership.
 - Dynamic actions are available by default and written to the evidence audit stream.
 - Static backend: MIT-licensed Gwxapkg through an isolated adapter; the MCP core does not embed GPL static engines.
 - Protocol and hook implementation: clean-room core. External First-style offset profiles may be loaded locally for compatibility testing but are not copied into this repository.
@@ -61,6 +61,8 @@ Acceptance: encrypted/plain main-package, subpackage, plugin, and mini-game fixt
 - Validate schema, module hash, and offset bounds.
 - Support explicit AOB signatures and wildcard candidate scanning.
 - Persist generated profiles as candidates only.
+- Bind clean-room/generated profiles to the expected module SHA-256 and block candidate injection until review promotion.
+- Record reviewer identity, review time, and evidence references in promoted generated profiles; reject target/profile version mismatches.
 - Add a clean-room signature database and runtime validation workflow.
 
 Acceptance: known versions reproduce stable candidates; ambiguous candidates never auto-inject; at least two WMPF versions pass runtime validation.

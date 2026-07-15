@@ -11,6 +11,8 @@
 
 - MCP tools use the `wxmp_*` prefix.
 - Dynamic operations require an explicit `session_id`; context-specific operations also require `context_id`.
+- Session history is multi-session, but the shared WMPF `127.0.0.1:9421` runtime slot is fail-safe single-owner because the runtime protocol has no PID/session handshake. Reject concurrent attaches instead of guessing socket ownership.
+- Unexpected runtime disconnects must retain the MCP session, requeue the same bridge owner, reset only ephemeral CDP state, and preserve evidence/context listeners for reconnect.
 - Frida is imported lazily by the runtime adapter.
 - Static engines are isolated behind adapters; do not embed GPL implementations into the MIT core.
 - Unsupported runtime capabilities must return structured evidence, never synthetic success.
@@ -22,6 +24,7 @@
 - Before commit run: `npm run check`, `git diff --check`, and `git status --short`.
 - New tools require contract tests and README/API updates.
 - Changes to public tool schemas require a version bump.
+- Generated profile candidates must bind to a module SHA-256 and remain non-injectable until their confidence is promoted with review evidence.
 
 ## Git
 

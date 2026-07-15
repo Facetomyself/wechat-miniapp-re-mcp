@@ -45,6 +45,7 @@ function defaultGwxapkg(): string | null {
 
 export function loadConfig(): AppConfig {
   const debugPort = Number(process.env.WXMP_DEBUG_PORT ?? 9421);
+  const configuredEventLimit = Number(process.env.WXMP_EVENT_LIMIT ?? 5000);
   return {
     workspaceRoot: path.resolve(process.env.WXMP_WORKSPACE_ROOT ?? defaultWorkspaceRoot()),
     profileDirs: splitPaths(process.env.WXMP_PROFILE_DIR),
@@ -52,7 +53,7 @@ export function loadConfig(): AppConfig {
     gwxapkgPath: defaultGwxapkg(),
     debugHost: process.env.WXMP_DEBUG_HOST ?? '127.0.0.1',
     debugPort: Number.isInteger(debugPort) && debugPort > 0 && debugPort < 65536 ? debugPort : 9421,
-    eventLimit: Math.max(100, Number(process.env.WXMP_EVENT_LIMIT ?? 5000)),
+    eventLimit: Number.isSafeInteger(configuredEventLimit) && configuredEventLimit >= 100 ? configuredEventLimit : 5000,
   };
 }
 
