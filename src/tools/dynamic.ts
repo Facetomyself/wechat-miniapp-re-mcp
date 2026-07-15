@@ -164,6 +164,61 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
       return result({ request, body });
     }),
 
+    entry('wxmp_get_api_inventory', 'Build a deduplicated API inventory across CDP Network requests and wx.request/fetch hooks, grouped by domain.', objectSchema({
+      session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), include_hooks: booleanProp('Also drain the wx.request/fetch hook buffer.'),
+    }, ['session_id']), async (args) => {
+      const session = app.sessions.get(text(args, 'session_id'));
+      const urls = new Map<string, { methods: Set<string>; resourceTypes: Set<string>; statusCodes: number[] }>();
+      const add = (url: string, method: string, resourceType: string, status?: number) => {
+        if (!url || url.startsWith('data:') || url.startsWith('blob:')) return;
+        let normalized = url;
+        try { const u = new URL(url); normalized = `${u.origin}${u.pathname}`; } catch (_) { /* keep original */ }
+        const entry = urls.get(normalized) || { methods: new Set<string>(), resourceTypes: new Set<string>(), statusCodes: [] };
+        entry.methods.add(method.toUpperCase());
+        if (resourceType) entry.resourceTypes.add(resourceType);
+        if (status !== undefined) entry.statusCodes.push(status);
+        urls.set(normalized, entry);
+      };
+      // CDP Network
+      for (const req of session.channel.requests.values()) {
+        add(req.url, req.method, req.resourceType ?? 'unknown', req.response?.status);
+      }
+      // wx.request hook
+      if (bool(args, 'include_hooks')) {
+        try {
+          const hookResponse = await session.channel.send('Runtime.evaluate', {
+            expression: 'globalThis.__wxmpRequestHook ? globalThis.__wxmpRequestHook.drain() : []', awaitPromise: true, returnByValue: true,
+          });
+          const hooked = ((hookResponse.result ?? {}) as Record<string, unknown>).result;
+          if (Array.isArray(hooked)) {
+            for (const record of hooked as Array<Record<string, unknown>>) {
+              const url = String(record.url ?? ''); const method = String(record.method ?? 'GET');
+              const status = record.response && typeof record.response === 'object' ? Number((record.response as Record<string, unknown>).status ?? 0) : undefined;
+              add(url, method, 'wx.request-hook', status || undefined);
+            }
+          }
+        } catch (_) { /* hook may not be active */ }
+      }
+      // Build inventory
+      const domains = new Map<string, Array<{ path: string; methods: string[]; resourceTypes: string[]; lastStatus?: number }>>();
+      for (const [url, entry] of urls) {
+        try {
+          const host = new URL(url).host || 'unknown';
+          const items = domains.get(host) || [];
+          items.push({
+            path: new URL(url).pathname || '/',
+            methods: [...entry.methods].sort(),
+            resourceTypes: [...entry.resourceTypes].sort(),
+            lastStatus: entry.statusCodes.length ? entry.statusCodes[entry.statusCodes.length - 1] : undefined,
+          });
+          domains.set(host, items);
+        } catch (_) { /* skip malformed */ }
+      }
+      const inventory = [...domains.entries()].map(([host, items]) => ({ host, endpoints: items.length, items: items.slice(0, 100) }));
+      await session.evidence.append('api.inventory', { totalUrls: urls.size, domains: inventory.length }, { operation: 'wxmp_get_api_inventory' });
+      return result({ totalUrls: urls.size, domains: inventory.length, inventory: inventory.slice(0, 20) });
+    }),
+
     entry('wxmp_replay_request', 'Replay an indexed request inside the WMPF runtime with optional overrides.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), request_id: stringProp('Indexed requestId.'), url: stringProp('Optional URL override.'), method: stringProp('Optional method override.'), headers: { type: 'object', additionalProperties: { type: 'string' } }, body: stringProp('Optional body override.') }, ['session_id', 'request_id']), async (args) => {
       const { sessionId, contextId } = sessionContext(app, args); const session = app.sessions.get(sessionId); const original = session.channel.requests.get(text(args, 'request_id')); if (!original) throw new Error('REQUEST_NOT_FOUND');
       const request = { url: optionalText(args, 'url') ?? original.url, method: optionalText(args, 'method') ?? original.method, headers: (args.headers ?? original.requestHeaders) as Record<string, string>, body: args.body === undefined ? original.postData : String(args.body) };
