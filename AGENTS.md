@@ -27,6 +27,8 @@
 - New tools require contract tests and README/API updates.
 - Changes to public tool schemas require a version bump.
 - Generated profile candidates must bind to a module SHA-256 and remain non-injectable until their confidence is promoted with review evidence.
+- Acceptance claims must be recorded below `data/acceptance/` and pass `npm run acceptance`; do not represent a shallower Profile gate as full semantic verification.
+- Real-target validation uses `scripts/live-semantic-gate.mjs`. Keep summaries and session artifacts in the configured workspace, and preserve structured failure evidence when a lifecycle gate does not trigger.
 
 ## Git
 

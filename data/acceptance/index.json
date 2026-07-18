@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    "windows-19977.full-semantic.json",
+    "windows-20079.profile-runtime.json"
+  ]
+}

@@ -1,6 +1,6 @@
 # wechat-miniapp-re-mcp 深度分析与多源搜索综合报告
 
-> 状态说明：本文是 2026-07-15 的 pre-v0.3.0 研究快照；当前 capability 语义、profile 默认链路、工具数、测试数和剩余门禁以 [`progress.md`](progress.md) 与 [`api.md`](api.md) 为准。
+> 状态说明：本文是 2026-07-15 的 pre-v0.3.0 研究快照；其中 capability matrix、工具数、测试数和第 7 节旧路线图均已过期。当前验收状态以 [`progress.md`](progress.md) 与 [`api.md`](api.md) 为准，后续优先级以 [`roadmap.md`](roadmap.md) 为准。
 
 > 生成日期: 2026-07-15
 > 搜索方法: search-layer v2.2 — WebSearch (3轮, 12 queries) + Exa (30 results) + Tavily + gh CLI (GitHub API)

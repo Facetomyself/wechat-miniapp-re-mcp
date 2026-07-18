@@ -14,7 +14,10 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node scripts/run-tests.mjs",
     "smoke": "node scripts/smoke-list-tools.mjs",
-    "contract": "node scripts/check-contract.mjs",
+    "acceptance": "node scripts/check-acceptance.mjs",
+    "contract": "node scripts/check-contract.mjs && npm run acceptance",
+    "live-gate": "node scripts/live-semantic-gate.mjs",
+    "live-gate:dry": "node scripts/live-semantic-gate.mjs --dry-run",
     "check": "npm run typecheck && npm run test && npm run contract && npm run smoke",
     "start": "node build/src/index.js"
   },

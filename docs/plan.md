@@ -1,5 +1,7 @@
 # Implementation Plan
 
+> Status: historical delivery plan. Phases 0-6 are substantially complete; current follow-up priorities and acceptance gates are maintained in [`roadmap.md`](roadmap.md).
+
 ## Objective
 
 Deliver a lightweight, reverse-engineering focused MCP server for PC WeChat WMPF runtimes and `.wxapkg` packages. The server must start over stdio without WeChat, a GUI, an SSE service, or an active Frida target, and load target-specific components only when requested.
