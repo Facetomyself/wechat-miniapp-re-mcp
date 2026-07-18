@@ -32,9 +32,9 @@
 | 维度 | 当前状态 | 证据 |
 |---|---|---|
 | MCP surface | `53` 个 `wxmp_*` tools | `npm run contract` / `npm run smoke` |
-| 自动化测试 | `92` tests，全部通过 | `npm run check` |
-| 代码覆盖率 | Node.js 22 下 overall line `72.16%`（已包含 tracked acceptance/live scripts） | `node --experimental-test-coverage --test ...` |
-| 关键低覆盖模块 | `sessions/manager.js` `14.75%`；`frida-adapter.js` `10.34%`；`dynamic.js` `54.11%` | Node.js 22 coverage report |
+| 自动化测试 | `99` tests，全部通过 | `npm run check` |
+| 代码覆盖率 | Node.js 22 下 overall line `76.79%`（已包含 tracked acceptance/live scripts） | `node --experimental-test-coverage --test ...` |
+| 关键低覆盖模块 | `sessions/manager.js` `34.64%`；`frida-adapter.js` `62.69%`；`dynamic.js` `54.11%` | Node.js 22 coverage report |
 | 动态链 | WMPF v19977 完整 semantic gate 已通过 | [`progress.md`](progress.md) |
 | 第二版本 | WMPF v20079 Profile/AOB/hash/attach/detach 已通过，完整 semantic gate 未完成 | [`progress.md`](progress.md) |
 | 静态链 | subprocess decompile/search/index/repack 与失败门禁已通过 | `test/static-adapter.test.ts` |

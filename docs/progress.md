@@ -22,6 +22,13 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 - On 2026-07-18 the current v19977 process passed health/Profile/module/AOB/Frida attach and clean detach, but its lifecycle did not enter the WMPF debug filter during the run; `runtimeBridge` failed and the remaining semantic gates were recorded as `not-run`. Failure summary: `workspace/live-verification/wechat-miniapp/live-semantic-gate-v0.3.1-wmpf19977-1784349870424.json`, SHA-256 `32d88592c39c829d3c93b4fe792d2b82e56f89ffe10d888e68a5bd47c7648f00`. This is runner/failure-closure evidence, not a new successful v19977 acceptance run.
 - No WMPF v20079 runtime is currently active on this machine, so the second-version semantic gate remains pending.
 
+## Project review P0 remediation
+
+- Windows default package discovery now includes current `radium/users/<user>/applet/packages` trees while retaining the legacy `radium/Applet/packages` root; the default stdio `wxmp_scan_packages` call finds cached packages on the reviewed xwechat installation.
+- A connected bridge now proves transport only. `capabilities.cdp` becomes true only after `Runtime.enable` succeeds, while Debugger and Network probes retain independent partial-capability results across reconnect activation.
+- Frida script creation/loading failures unload any owned script and detach the process session. Unexpected Frida detach also stops the DevTools proxy, with a structured finding and evidence event if proxy cleanup fails.
+- Node.js 20 and 22 both pass `99` tests, `53`-tool contract/acceptance/smoke gates; Node.js 22 line coverage is `76.79%` overall, `34.64%` for `sessions/manager.js`, `62.69%` for `frida-adapter.js`, and `54.11%` for `dynamic.js`.
+
 ## v0.3.0 review remediation
 
 - Runtime capability flags now depend on successful CDP domain probes or non-zero installed wrappers.
@@ -81,7 +88,7 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 ## Automated verification
 
 - TypeScript strict typecheck and build.
-- Node test suite: 92 passing tests covering acceptance records, live-runner dry-run/path guards, bridge, codec, CDP state, nested WMPF `wx` resolution, context/request indexing, originating/unscoped-context source and replay behavior, request hooks, proxy client ID/context isolation, evidence count/byte overflow and write recovery, profile gates, cross-version AOB/profile fixtures, static guards and real backend subprocess behavior, server schema validation, and target discovery.
+- Node test suite: 99 passing tests covering acceptance records, live-runner dry-run/path guards, bridge, codec, CDP state and activation probes, nested WMPF `wx` resolution, context/request indexing, originating/unscoped-context source and replay behavior, request hooks, proxy client ID/context isolation and detach cleanup, Frida script-init cleanup, current xwechat package discovery, evidence count/byte overflow and write recovery, profile gates, cross-version AOB/profile fixtures, static guards and real backend subprocess behavior, server schema validation, and target discovery.
 - MCP contract checks required tools, prefix, duplicates, and minimum inventory.
 - stdio smoke verifies initialize, list-tools, and `wxmp_health` without WeChat.
 - Production dependency audit reports no known vulnerabilities at the time of this update.

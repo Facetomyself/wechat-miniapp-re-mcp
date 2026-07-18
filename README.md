@@ -130,7 +130,7 @@ generated candidate 的默认 confidence 为 `candidate`。在以下条件全部
 |---|---|---|
 | stdio cold start / initialize / list-tools / health | 已通过 | 无微信、无 Frida target 环境可运行 |
 | MCP tool contract | 已通过 | `53` 个 `wxmp_*` tools |
-| Node.js 20 / 22 CI | 已通过 | `92` tests、typecheck、contract、acceptance、smoke |
+| Node.js 20 / 22 CI | 已通过 | `99` tests、typecheck、contract、acceptance、smoke |
 | WMPF v19977 动态语义链 | 已通过 | AppService、evaluate、真实 breakpoint、727 trace wrappers、request hook、Network body、replay、reconnect、detach、evidence export |
 | WMPF v20079 Profile 交叉验证 | 已通过 | AOB 唯一命中、SHA-256、bounds、reviewed profile、生产 hook attach/ready/detach |
 | WMPF v20079 完整 mini-program semantic gate | 待补齐 | AppService/CDP/Network/trace/request-hook/replay/reconnect 尚待同序列验证 |
@@ -454,7 +454,7 @@ git diff --check
 
 CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，使用 Node.js 20 与 22 matrix。当前基线为：
 
-- `92` tests；
+- `99` tests；
 - `53` MCP tools；
 - production dependency audit：`0 vulnerabilities`（以最近一次审计为准）。
 
@@ -611,7 +611,7 @@ See [`docs/api.md`](docs/api.md) for the complete API reference.
 | Area | Status |
 |---|---|
 | stdio cold start, contract, smoke | Verified |
-| Node.js 20 and 22 CI | Verified, 92 tests |
+| Node.js 20 and 22 CI | Verified, 99 tests |
 | WMPF v19977 full live semantic workflow | Verified |
 | WMPF v20079 profile/AOB/hash binding and production attach/detach | Verified |
 | WMPF v20079 full mini-program semantic workflow | Pending repeat gate |
