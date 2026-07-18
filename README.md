@@ -130,7 +130,7 @@ generated candidate 的默认 confidence 为 `candidate`。在以下条件全部
 |---|---|---|
 | stdio cold start / initialize / list-tools / health | 已通过 | 无微信、无 Frida target 环境可运行 |
 | MCP tool contract | 已通过 | `53` 个 `wxmp_*` tools |
-| Node.js 20 / 22 CI | 已通过 | `86` tests、typecheck、contract、smoke |
+| Node.js 20 / 22 CI | 已通过 | `92` tests、typecheck、contract、acceptance、smoke |
 | WMPF v19977 动态语义链 | 已通过 | AppService、evaluate、真实 breakpoint、727 trace wrappers、request hook、Network body、replay、reconnect、detach、evidence export |
 | WMPF v20079 Profile 交叉验证 | 已通过 | AOB 唯一命中、SHA-256、bounds、reviewed profile、生产 hook attach/ready/detach |
 | WMPF v20079 完整 mini-program semantic gate | 待补齐 | AppService/CDP/Network/trace/request-hook/replay/reconnect 尚待同序列验证 |
@@ -436,8 +436,10 @@ Profile 分为三类：
 npm ci
 npm run typecheck
 npm test
+npm run acceptance
 npm run contract
 npm run smoke
+npm run live-gate:dry -- --wmpf-version 20079
 npm run check
 npm audit --omit=dev --audit-level=high
 git diff --check
@@ -447,14 +449,27 @@ git diff --check
 
 1. TypeScript strict typecheck；
 2. build + Node test suite；
-3. MCP tool contract；
+3. MCP tool/API/version contract + acceptance records；
 4. stdio initialize/list-tools/health smoke。
 
 CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，使用 Node.js 20 与 22 matrix。当前基线为：
 
-- `86` tests；
+- `92` tests；
 - `53` MCP tools；
 - production dependency audit：`0 vulnerabilities`（以最近一次审计为准）。
+
+### Acceptance 与真实 target gate
+
+机器可读版本验收记录位于 [`data/acceptance/`](data/acceptance/README.md)。`npm run acceptance` 会校验 schema、record inventory、Profile 文件 SHA-256、module SHA-256、evidence 引用，以及 `profile-static` / `profile-runtime` / `full-semantic` 深度是否名副其实。
+
+真实 WMPF gate 使用 tracked runner，不再从 `.wxmp-workspace` 临时脚本复制：
+
+```powershell
+& "D:\reverse_ENV\tools\node\npm.cmd" run live-gate:dry -- --wmpf-version 20079
+& "D:\reverse_ENV\tools\node\npm.cmd" run live-gate -- --wmpf-version 20079
+```
+
+runner 固定执行 Profile/AOB、attach/bridge、AppService、evaluate、breakpoint、API inventory、trace、request hook、Network body、replay、reconnect、detach 和 evidence export。失败也会生成结构化 summary 与三件套 evidence；`--skip-reconnect` 只能用于缩减诊断，不能形成 `full-semantic` acceptance。
 
 ### 提交规则
 
@@ -481,19 +496,21 @@ CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，使用 Node.j
 |---|---|
 | [`docs/api.md`](docs/api.md) | 53 个 MCP tools 的参数与关键语义 |
 | [`docs/progress.md`](docs/progress.md) | 实现完成度、真实 target gate 与剩余项 |
-| [`docs/plan.md`](docs/plan.md) | 当前实现计划与 locked decisions |
+| [`docs/roadmap.md`](docs/roadmap.md) | 当前后续完善路线图、优先级与验收门槛 |
+| [`docs/plan.md`](docs/plan.md) | 初始交付计划与 locked decisions，主体阶段已完成 |
 | [`docs/original-plan.md`](docs/original-plan.md) | 初始 `/plan` 会话产物，保留历史决策背景 |
 | [`docs/lessons-learned.md`](docs/lessons-learned.md) | 已知行为、运行时坑点和经验 |
-| [`docs/deep-analysis-and-research-report.md`](docs/deep-analysis-and-research-report.md) | 深度分析与研究材料 |
+| [`docs/deep-analysis-and-research-report.md`](docs/deep-analysis-and-research-report.md) | 2026-07-15 历史研究快照，当前状态以 progress/roadmap 为准 |
 | [`AGENTS.md`](AGENTS.md) | 仓库边界、架构约束、开发和 Git 规则 |
 
 ## Roadmap
 
-- 在 WMPF v20079 或后续 reviewed version 上重复完整 mini-program semantic gate；
-- 继续验证 cross-version AOB 的稳定窗口，并在出现多命中时增加 secondary constraint；
-- 完善 macOS target/profile/runtime adapter；
-- 评估额外 MCP conformance gate；
-- 保持 static backend fixture 与真实 subprocess contract 同步。
+- `0.3.2`：建立可重复 live semantic gate，在 v20079 完成第二版本完整验证，并收口 acceptance manifest 与文档事实源；
+- `0.4.0`：补齐 structured output、tool annotations、Inspector gate，以及调用栈/作用域/XHR breakpoint/WebSocket/WASM 等调试原语；
+- `0.5.0`：完善 evidence 分层、静态索引 v2、runtime/static correlation 和外部 Profile candidate import contract；
+- `1.0.0-rc`：完成架构拆分、关键状态机覆盖率、跨平台 core CI、release/tag/changelog 与兼容性冻结。
+
+完整优先级、验收门槛和明确不做项见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## License
 
@@ -594,7 +611,7 @@ See [`docs/api.md`](docs/api.md) for the complete API reference.
 | Area | Status |
 |---|---|
 | stdio cold start, contract, smoke | Verified |
-| Node.js 20 and 22 CI | Verified, 86 tests |
+| Node.js 20 and 22 CI | Verified, 92 tests |
 | WMPF v19977 full live semantic workflow | Verified |
 | WMPF v20079 profile/AOB/hash binding and production attach/detach | Verified |
 | WMPF v20079 full mini-program semantic workflow | Pending repeat gate |

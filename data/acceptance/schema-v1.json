@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Facetomyself/wechat-miniapp-re-mcp/blob/main/data/acceptance/schema-v1.json",
+  "title": "WMPF acceptance record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "recordId",
+    "platform",
+    "wmpfVersion",
+    "packageVersion",
+    "recordedAt",
+    "validationDepth",
+    "recordStatus",
+    "module",
+    "profile",
+    "gates",
+    "evidenceRefs"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "recordId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,119}$"
+    },
+    "platform": {
+      "enum": [
+        "windows",
+        "darwin"
+      ]
+    },
+    "wmpfVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "packageVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "recordedAt": {
+      "type": "string",
+      "minLength": 20
+    },
+    "validationDepth": {
+      "enum": [
+        "profile-static",
+        "profile-runtime",
+        "full-semantic"
+      ]
+    },
+    "recordStatus": {
+      "enum": [
+        "verified",
+        "pending",
+        "rejected"
+      ]
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "fileSha256",
+        "provenance",
+        "confidence"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^data/profiles/clean-room/[A-Za-z0-9._/-]+\\.json$"
+        },
+        "fileSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "provenance": {
+          "enum": [
+            "clean-room",
+            "generated",
+            "external-legacy"
+          ]
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "candidate",
+            "external"
+          ]
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profileSchema",
+        "moduleHash",
+        "aobUnique",
+        "hookAttach",
+        "runtimeBridge",
+        "appserviceContext",
+        "evaluate",
+        "breakpoint",
+        "trace",
+        "requestHook",
+        "networkBody",
+        "replay",
+        "reconnect",
+        "evidenceExport",
+        "detach"
+      ],
+      "properties": {
+        "profileSchema": {
+          "$ref": "#/$defs/gate"
+        },
+        "moduleHash": {
+          "$ref": "#/$defs/gate"
+        },
+        "aobUnique": {
+          "$ref": "#/$defs/gate"
+        },
+        "hookAttach": {
+          "$ref": "#/$defs/gate"
+        },
+        "runtimeBridge": {
+          "$ref": "#/$defs/gate"
+        },
+        "appserviceContext": {
+          "$ref": "#/$defs/gate"
+        },
+        "evaluate": {
+          "$ref": "#/$defs/gate"
+        },
+        "breakpoint": {
+          "$ref": "#/$defs/gate"
+        },
+        "trace": {
+          "$ref": "#/$defs/gate"
+        },
+        "requestHook": {
+          "$ref": "#/$defs/gate"
+        },
+        "networkBody": {
+          "$ref": "#/$defs/gate"
+        },
+        "replay": {
+          "$ref": "#/$defs/gate"
+        },
+        "reconnect": {
+          "$ref": "#/$defs/gate"
+        },
+        "evidenceExport": {
+          "$ref": "#/$defs/gate"
+        },
+        "detach": {
+          "$ref": "#/$defs/gate"
+        }
+      }
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/evidenceRef"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "pending",
+            "not-applicable"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$"
+          }
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "passed"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "required": [
+              "evidence"
+            ],
+            "properties": {
+              "evidence": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "ref"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{1,79}$"
+        },
+        "kind": {
+          "enum": [
+            "repository",
+            "workspace",
+            "github",
+            "external"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

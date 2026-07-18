@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "acceptanceGates": [
+    "profileSchema",
+    "moduleHash",
+    "aobUnique",
+    "hookAttach",
+    "runtimeBridge",
+    "appserviceContext",
+    "evaluate",
+    "breakpoint",
+    "trace",
+    "requestHook",
+    "networkBody",
+    "replay",
+    "reconnect",
+    "evidenceExport",
+    "detach"
+  ],
+  "depths": {
+    "profile-static": [
+      "profileSchema",
+      "moduleHash"
+    ],
+    "profile-runtime": [
+      "profileSchema",
+      "moduleHash",
+      "aobUnique",
+      "hookAttach",
+      "detach"
+    ],
+    "full-semantic": [
+      "profileSchema",
+      "moduleHash",
+      "aobUnique",
+      "hookAttach",
+      "runtimeBridge",
+      "appserviceContext",
+      "evaluate",
+      "breakpoint",
+      "trace",
+      "requestHook",
+      "networkBody",
+      "replay",
+      "reconnect",
+      "evidenceExport",
+      "detach"
+    ]
+  },
+  "liveRunnerRequired": [
+    "health",
+    "profileSchema",
+    "moduleHash",
+    "aobUnique",
+    "hookAttach",
+    "runtimeBridge",
+    "appserviceContext",
+    "evaluate",
+    "breakpoint",
+    "apiInventory",
+    "trace",
+    "requestHook",
+    "networkBody",
+    "replay",
+    "reconnect",
+    "detach",
+    "evidenceExport"
+  ]
+}

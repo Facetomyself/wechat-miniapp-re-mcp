@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "recordId": "windows-20079-profile-runtime-v031",
+  "platform": "windows",
+  "wmpfVersion": 20079,
+  "packageVersion": "0.3.1",
+  "recordedAt": "2026-07-15T12:44:09.202Z",
+  "validationDepth": "profile-runtime",
+  "recordStatus": "verified",
+  "module": {
+    "name": "flue.dll",
+    "sha256": "b28ec2d547e8771aeebe94ba77bc618941c0ce0794ef443f905666f0668f5d2b"
+  },
+  "profile": {
+    "path": "data/profiles/clean-room/windows-20079.json",
+    "fileSha256": "6500a39e8f67ed151d75b8a505c7ff908f6e4671dc537a2e5d3acf143f089749",
+    "provenance": "generated",
+    "confidence": "high"
+  },
+  "gates": {
+    "profileSchema": {
+      "status": "passed",
+      "evidence": [
+        "profile",
+        "progress"
+      ]
+    },
+    "moduleHash": {
+      "status": "passed",
+      "evidence": [
+        "profile",
+        "progress"
+      ]
+    },
+    "aobUnique": {
+      "status": "passed",
+      "evidence": [
+        "signature-db",
+        "progress"
+      ]
+    },
+    "hookAttach": {
+      "status": "passed",
+      "evidence": [
+        "profile",
+        "progress"
+      ]
+    },
+    "runtimeBridge": {
+      "status": "pending",
+      "note": "The production Frida adapter reached ready, but a mini-program CDP bridge semantic gate was not run."
+    },
+    "appserviceContext": {
+      "status": "pending",
+      "note": "AppService discovery remains part of the second-version semantic gate."
+    },
+    "evaluate": {
+      "status": "pending"
+    },
+    "breakpoint": {
+      "status": "pending"
+    },
+    "trace": {
+      "status": "pending"
+    },
+    "requestHook": {
+      "status": "pending"
+    },
+    "networkBody": {
+      "status": "pending"
+    },
+    "replay": {
+      "status": "pending"
+    },
+    "reconnect": {
+      "status": "pending"
+    },
+    "evidenceExport": {
+      "status": "pending"
+    },
+    "detach": {
+      "status": "passed",
+      "evidence": [
+        "profile",
+        "progress"
+      ]
+    }
+  },
+  "evidenceRefs": [
+    {
+      "id": "profile",
+      "kind": "repository",
+      "ref": "data/profiles/clean-room/windows-20079.json"
+    },
+    {
+      "id": "signature-db",
+      "kind": "repository",
+      "ref": "data/profiles/aob-signatures.json"
+    },
+    {
+      "id": "progress",
+      "kind": "repository",
+      "ref": "docs/progress.md#wmpf-v20079-profile-cross-version-closure"
+    },
+    {
+      "id": "delivery-pr",
+      "kind": "github",
+      "ref": "https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/11"
+    },
+    {
+      "id": "upstream-offset",
+      "kind": "github",
+      "ref": "https://github.com/evi0s/WMPFDebugger/commit/5e4695e9f1e2fa3866bb8c93e631449c4164cdc4",
+      "note": "Independent offset candidate used as cross-check evidence, not copied implementation."
+    }
+  ],
+  "notes": [
+    "This record verifies only the profile-runtime depth. Full AppService/CDP/Network/trace/request-hook/replay/reconnect semantics remain pending."
+  ]
+}
