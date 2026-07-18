@@ -19,7 +19,7 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 - `npm run acceptance` validates record schema, Profile file SHA-256, module SHA-256, Profile metadata, evidence references, index drift, and the gates required by the claimed depth.
 - The MCP contract now also checks package/lock/source/build version agreement, README tool-count markers, and exact `docs/api.md` tool inventory.
 - Added the tracked `scripts/live-semantic-gate.mjs` runner with controlled output paths, target/version selection, AOB regeneration, canonical gate names, reconnect control, sanitized summaries, and failure evidence export.
-- On 2026-07-18 the current v19977 process passed health/Profile/module/AOB/Frida attach and clean detach, but its lifecycle did not enter the WMPF debug filter during the run; `runtimeBridge` failed and the remaining semantic gates were recorded as `not-run`. Failure summary: `workspace/live-verification/wechat-miniapp/live-semantic-gate-v0.3.1-wmpf19977-1784349870424.json`, SHA-256 `32d88592c39c829d3c93b4fe792d2b82e56f89ffe10d888e68a5bd47c7648f00`. This is runner/failure-closure evidence, not a new successful v19977 acceptance run.
+- On 2026-07-18 the current v19977 process passed health/Profile/module/AOB/Frida attach and clean detach, but its lifecycle did not enter the WMPF debug filter during the run; `runtimeBridge` failed and the remaining semantic gates were recorded as `not-run`. Failure summary: `workspace/live-verification/wechat-miniapp/live-semantic-gate-v0.3.1-wmpf19977-1784349870424.json`, SHA-256 `32d88592c39c829d3c93b4fe792d2b82e56f89ffe10d888e68a5bd47c7648f00`. This failure-closure evidence was later superseded by the successful post-review repeat recorded below.
 - No WMPF v20079 runtime is currently active on this machine, so the second-version semantic gate remains pending.
 
 ## Project review P0 remediation
@@ -28,6 +28,7 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 - A connected bridge now proves transport only. `capabilities.cdp` becomes true only after `Runtime.enable` succeeds, while Debugger and Network probes retain independent partial-capability results across reconnect activation.
 - Frida script creation/loading failures unload any owned script and detach the process session. Unexpected Frida detach also stops the DevTools proxy, with a structured finding and evidence event if proxy cleanup fails.
 - Node.js 20 and 22 both pass `99` tests, `53`-tool contract/acceptance/smoke gates; Node.js 22 line coverage is `76.79%` overall, `34.64%` for `sessions/manager.js`, `62.69%` for `frida-adapter.js`, and `54.11%` for `dynamic.js`.
+- After PR #15, a fresh v19977 mini-program lifecycle completed every required live gate: runtime bridge and CDP probes, AppService selection, evaluate, a real breakpoint, 727 trace wrappers, request hooks, API inventory, Network body, replay, same-session restart/reconnect, detach, and evidence export. The runner finished with `passed=true` and no errors; exported findings were resolved. Summary: `workspace/live-verification/wechat-miniapp/live-semantic-gate-v0.3.1-wmpf19977-1784363599773.json`, SHA-256 `efa04133c5352eb83b28fe8bc1b24807ecee1f610d31c91f1d39c677ed8168d1`.
 
 ## v0.3.0 review remediation
 
