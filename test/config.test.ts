@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { loadConfig, defaultPackageRoots } from '../src/config.js';
+import { loadConfig, defaultPackageRoots, windowsPackageRoots } from '../src/config.js';
 
 test('loadConfig resolves workspace root and debug port', () => {
   const config = loadConfig();
@@ -42,6 +44,28 @@ test('defaultPackageRoots returns Windows AppData path on win32', () => {
   } else if (process.platform === 'darwin') {
     assert.ok(roots.length > 0);
     assert.ok(roots[0].includes('com.tencent.xinWeChat'));
+  }
+});
+
+test('windowsPackageRoots discovers current per-user xwechat package directories', async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-config-'));
+  const radiumRoot = path.join(home, 'AppData', 'Roaming', 'Tencent', 'xwechat', 'radium');
+  const firstCurrentRoot = path.join(radiumRoot, 'users', 'user-a', 'applet', 'packages');
+  const secondCurrentRoot = path.join(radiumRoot, 'users', 'user-c', 'applet', 'packages');
+  const incompleteUserRoot = path.join(radiumRoot, 'users', 'user-b');
+  try {
+    assert.deepEqual(windowsPackageRoots(home), [path.join(radiumRoot, 'Applet', 'packages')]);
+    await fs.mkdir(firstCurrentRoot, { recursive: true });
+    await fs.mkdir(secondCurrentRoot, { recursive: true });
+    await fs.mkdir(incompleteUserRoot, { recursive: true });
+    const roots = windowsPackageRoots(home);
+    assert.deepEqual(roots, [
+      path.join(radiumRoot, 'Applet', 'packages'),
+      firstCurrentRoot,
+      secondCurrentRoot,
+    ]);
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
   }
 });
 

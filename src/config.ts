@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export interface AppConfig {
@@ -93,10 +93,29 @@ export function loadConfig(): AppConfig {
   };
 }
 
+export function windowsPackageRoots(home: string): string[] {
+  const radiumRoot = path.join(home, 'AppData', 'Roaming', 'Tencent', 'xwechat', 'radium');
+  const legacyRoot = path.join(radiumRoot, 'Applet', 'packages');
+  const usersRoot = path.join(radiumRoot, 'users');
+  const roots = [legacyRoot];
+  try {
+    const users = readdirSync(usersRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of users) {
+      const packagesRoot = path.join(usersRoot, entry.name, 'applet', 'packages');
+      if (existsSync(packagesRoot)) roots.push(packagesRoot);
+    }
+  } catch {
+    // Current xwechat installs may not have created a per-user package tree yet.
+  }
+  return roots.filter((candidate, index, all) => all.indexOf(candidate) === index);
+}
+
 export function defaultPackageRoots(): string[] {
   const home = os.homedir();
   if (process.platform === 'win32') {
-    return [path.join(home, 'AppData', 'Roaming', 'Tencent', 'xwechat', 'radium', 'Applet', 'packages')];
+    return windowsPackageRoots(home);
   }
   if (process.platform === 'darwin') {
     return [

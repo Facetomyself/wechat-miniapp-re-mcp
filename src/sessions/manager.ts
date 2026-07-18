@@ -343,7 +343,7 @@ export class SessionManager {
   private handleConnected(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session || ['closed', 'detaching', 'failed'].includes(session.state)) return;
-    session.capabilities.cdp = true;
+    session.capabilities.cdp = false;
     session.capabilities.debugger = false;
     session.capabilities.network = false;
     session.capabilities.wxTrace = false;
@@ -508,8 +508,8 @@ export class SessionManager {
   }
 
   private async activateConnectedSession(session: WxmpSession, generation: number): Promise<void> {
-    const probes: Array<{ method: string; capability?: 'debugger' | 'network'; params?: Record<string, unknown> }> = [
-      { method: 'Runtime.enable' },
+    const probes: Array<{ method: string; capability: 'cdp' | 'debugger' | 'network'; params?: Record<string, unknown> }> = [
+      { method: 'Runtime.enable', capability: 'cdp' },
       { method: 'Debugger.enable', capability: 'debugger' },
       { method: 'Network.enable', capability: 'network', params: { maxTotalBufferSize: 100_000_000 } },
     ];
@@ -518,12 +518,12 @@ export class SessionManager {
       try {
         await session.channel.send(probe.method, probe.params ?? {}, '', 10_000);
         if (session.runtimeGeneration !== generation || !this.bridge.isConnected(session.id)) return;
-        if (probe.capability) session.capabilities[probe.capability] = true;
+        session.capabilities[probe.capability] = true;
         this.resolveFinding(session, `capability-${probe.method}-failed`);
         await session.evidence.append('capability.probe', { method: probe.method, supported: true });
       } catch (error) {
         if (session.runtimeGeneration !== generation || !this.bridge.isConnected(session.id)) return;
-        if (probe.capability) session.capabilities[probe.capability] = false;
+        session.capabilities[probe.capability] = false;
         this.recordFinding(session, {
           id: `capability-${probe.method}-failed`,
           title: `${probe.method} capability probe failed`,
@@ -634,6 +634,18 @@ export class SessionManager {
       evidenceTypes: ['frida.detached'],
     });
     void session.evidence.append('frida.detached', event);
+    void this.stopProxy(sessionId).catch((error) => {
+      this.recordFinding(session, {
+        id: 'devtools-proxy-cleanup-failed',
+        title: 'DevTools proxy cleanup failed',
+        severity: 'high',
+        summary: error instanceof Error ? error.message : String(error),
+        evidenceTypes: ['devtools_proxy.cleanup_failed'],
+      });
+      void session.evidence.append('devtools_proxy.cleanup_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 }
 
