@@ -4,7 +4,7 @@
   "platform": "windows",
   "wmpfVersion": 19977,
   "packageVersion": "0.3.1",
-  "recordedAt": "2026-07-15T10:34:20.830Z",
+  "recordedAt": "2026-07-18T08:34:23.249Z",
   "validationDepth": "full-semantic",
   "recordStatus": "verified",
   "module": {
@@ -126,8 +126,8 @@
     {
       "id": "live-summary",
       "kind": "workspace",
-      "ref": "workspace/live-verification/wechat-miniapp/live-semantic-gate-v031-1784111644618.json",
-      "sha256": "3ac87d9c2befd661d71965f0013713abbfacf3d15cc018265c744699254c4272",
+      "ref": "workspace/live-verification/wechat-miniapp/live-semantic-gate-v0.3.1-wmpf19977-1784363599773.json",
+      "sha256": "efa04133c5352eb83b28fe8bc1b24807ecee1f610d31c91f1d39c677ed8168d1",
       "note": "Local sanitized summary; target artifacts remain outside Git."
     },
     {
@@ -139,9 +139,15 @@
       "id": "delivery-pr",
       "kind": "github",
       "ref": "https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/7"
+    },
+    {
+      "id": "review-p0-pr",
+      "kind": "github",
+      "ref": "https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/15"
     }
   ],
   "notes": [
-    "The full gate covered AppService selection, evaluate, a bound breakpoint, trace wrappers, request hooks, API inventory, Network response body, replay, same-session reconnect, evidence export, and detach."
+    "The full gate covered AppService selection, evaluate, a bound breakpoint, trace wrappers, request hooks, API inventory, Network response body, replay, same-session reconnect, evidence export, and detach.",
+    "The post-review repeat after PR #15 passed every required live gate with an empty runner error list; lifecycle findings were resolved before export."
   ]
 }
