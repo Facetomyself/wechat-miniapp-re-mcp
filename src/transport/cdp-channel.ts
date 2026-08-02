@@ -1,5 +1,5 @@
 import { EvidenceStore } from '../evidence/store.js';
-import { NetworkRecord, ScriptRecord, WmpfContext } from '../types.js';
+import { CdpExecutionContext, NetworkRecord, ScriptRecord } from '../types.js';
 import { WxmpError } from '../errors.js';
 
 interface PendingCommand {
@@ -9,7 +9,7 @@ interface PendingCommand {
 }
 
 type RawListener = (payload: string, contextId: string) => void;
-type ContextListener = (action: 'add' | 'remove', context: { id: string; name?: string; origin?: string; kind?: string }) => void;
+type ContextListener = (action: 'add' | 'remove', context: CdpExecutionContext) => void;
 
 export class CdpChannel {
   private commandId = 1000;
@@ -18,7 +18,7 @@ export class CdpChannel {
   private contextListeners = new Set<ContextListener>();
   readonly scripts = new Map<string, ScriptRecord>();
   readonly requests = new Map<string, NetworkRecord>();
-  readonly contexts = new Map<string, WmpfContext>();
+  readonly executionContexts = new Map<string, CdpExecutionContext>();
   lastPaused: Record<string, unknown> | null = null;
   traceActive = false;
 
@@ -98,7 +98,7 @@ export class CdpChannel {
         length: params.length === undefined ? undefined : Number(params.length),
         sourceMapURL: params.sourceMapURL === undefined ? undefined : String(params.sourceMapURL),
       };
-      if (script.scriptId) this.scripts.set(script.scriptId, script);
+      if (script.scriptId) this.scripts.set(compositeKey(eventContextId, script.scriptId), script);
     } else if (method === 'Debugger.paused') {
       this.lastPaused = params;
     } else if (method === 'Debugger.resumed') {
@@ -107,7 +107,7 @@ export class CdpChannel {
       const request = (params.request ?? {}) as Record<string, unknown>;
       const requestId = String(params.requestId ?? '');
       if (requestId) {
-        this.requests.set(requestId, {
+        this.requests.set(compositeKey(eventContextId, requestId), {
           requestId,
           contextId: eventContextId,
           url: String(request.url ?? ''),
@@ -116,12 +116,14 @@ export class CdpChannel {
           postData: request.postData === undefined ? undefined : String(request.postData),
           resourceType: params.type === undefined ? undefined : String(params.type),
           timestamp: params.timestamp === undefined ? undefined : Number(params.timestamp),
+          transport: 'cdp',
+          transportOptions: { observedBy: 'CDP.Network' },
         });
       }
     } else if (method === 'Network.responseReceived') {
       const requestId = String(params.requestId ?? '');
       const response = (params.response ?? {}) as Record<string, unknown>;
-      const existing = this.requests.get(requestId);
+      const existing = this.findRequestForEvent(requestId, eventContextId);
       if (existing) {
         existing.response = {
           status: Number(response.status ?? 0),
@@ -140,27 +142,35 @@ export class CdpChannel {
         const kind = lowerName.includes('game') ? 'minigame' as const
           : lowerName.includes('app') || lowerName.includes('service') || origin.includes('servicewechat') ? 'miniapp' as const
           : 'unknown' as const;
-        const ctx: WmpfContext = {
+        const role = lowerName.includes('game') ? 'minigame' as const
+          : lowerName.includes('service') || lowerName.includes('app') ? 'appservice' as const
+          : lowerName.includes('webview') || lowerName.includes('render') ? 'webview' as const
+          : lowerName.includes('worker') ? 'worker' as const
+          : 'unknown' as const;
+        const ctx: CdpExecutionContext = {
           id,
+          wmpfContextId: eventContextId,
+          uniqueId: context.uniqueId === undefined ? undefined : String(context.uniqueId),
           name,
           kind,
-          role: kind === 'minigame' ? 'minigame' : 'unknown',
+          role,
           origin,
-          probeConfidence: 'unprobed',
-          connectedAt: new Date().toISOString(),
-          capabilities: ['evaluate', 'capability-probe'],
+          auxData: context.auxData && typeof context.auxData === 'object' ? context.auxData as Record<string, unknown> : undefined,
+          createdAt: new Date().toISOString(),
+          provenance: 'cdp.Runtime.executionContextCreated',
         };
-        this.contexts.set(id, ctx);
-        for (const listener of this.contextListeners) {
-          listener('add', { id, name, origin, kind });
-        }
+        this.executionContexts.set(compositeKey(eventContextId, id), ctx);
+        for (const listener of this.contextListeners) listener('add', ctx);
       }
     } else if (method === 'Runtime.executionContextDestroyed') {
       const id = String(params.executionContextId ?? '');
       if (id) {
-        this.contexts.delete(id);
-        for (const listener of this.contextListeners) {
-          listener('remove', { id });
+        const removed = [...this.executionContexts.entries()].filter(([key, context]) => (
+          context.id === id && (!eventContextId || key === compositeKey(eventContextId, id))
+        ));
+        for (const [key, context] of removed) {
+          this.executionContexts.delete(key);
+          for (const listener of this.contextListeners) listener('remove', context);
         }
       }
     } else if (method === 'Runtime.consoleAPICalled') {
@@ -189,16 +199,72 @@ export class CdpChannel {
     return () => this.contextListeners.delete(listener);
   }
 
+  onExecutionContext(listener: ContextListener): () => void {
+    return this.onContext(listener);
+  }
+
+  findScript(scriptId: string, preferredContextId?: string): ScriptRecord | null {
+    return findIndexed(this.scripts, scriptId, preferredContextId, 'SCRIPT_ID_AMBIGUOUS');
+  }
+
+  findRequest(requestId: string, preferredContextId?: string): NetworkRecord | null {
+    return findIndexed(this.requests, requestId, preferredContextId, 'REQUEST_ID_AMBIGUOUS');
+  }
+
+  indexHookRecords(records: Array<Record<string, unknown>>, contextId: string): NetworkRecord[] {
+    const indexed: NetworkRecord[] = [];
+    for (const record of records) {
+      const cursor = Number(record.cursor ?? record.id ?? 0);
+      const requestId = typeof record.requestId === 'string' && record.requestId
+        ? record.requestId
+        : `hook-${Number.isSafeInteger(cursor) && cursor > 0 ? cursor : Date.now()}`;
+      const type = String(record.transport ?? record.type ?? 'fetch');
+      const transport: NetworkRecord['transport'] = type === 'wx.request' ? 'wx.request'
+        : type === 'XMLHttpRequest' || type === 'xhr' ? 'xhr'
+        : 'fetch';
+      const response = record.response && typeof record.response === 'object'
+        ? record.response as Record<string, unknown>
+        : null;
+      const item: NetworkRecord = {
+        requestId,
+        contextId,
+        url: String(record.url ?? ''),
+        method: String(record.method ?? 'GET'),
+        requestHeaders: normalizeHeaders(record.headers),
+        postData: record.body === undefined ? undefined : String(record.body),
+        resourceType: 'Hook',
+        timestamp: record.timestamp === undefined ? undefined : Number(record.timestamp),
+        transport,
+        transportOptions: {
+          observedBy: 'wxmpRequestHook',
+          bodyEncoding: record.bodyEncoding ?? 'bounded-string-preview',
+          callStack: record.callStack,
+          responseBody: response?.body,
+        },
+        hookCursor: Number.isSafeInteger(cursor) ? cursor : undefined,
+        response: response ? {
+          status: Number(response.status ?? 0),
+          headers: normalizeHeaders(response.headers),
+          statusText: response.statusText === undefined ? undefined : String(response.statusText),
+          mimeType: response.mimeType === undefined ? undefined : String(response.mimeType),
+        } : undefined,
+      };
+      this.requests.set(compositeKey(contextId, requestId), item);
+      indexed.push(item);
+    }
+    return indexed;
+  }
+
   disconnect(reason = 'runtime disconnected'): void {
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(new WxmpError('SESSION_DISCONNECTED', reason, { id }));
     }
     this.pending.clear();
-    for (const context of this.contexts.values()) {
-      for (const listener of this.contextListeners) listener('remove', { id: context.id, name: context.name, kind: context.kind });
+    for (const context of this.executionContexts.values()) {
+      for (const listener of this.contextListeners) listener('remove', context);
     }
-    this.contexts.clear();
+    this.executionContexts.clear();
     this.scripts.clear();
     this.requests.clear();
     this.lastPaused = null;
@@ -209,6 +275,13 @@ export class CdpChannel {
     this.disconnect(reason);
     this.rawListeners.clear();
     this.contextListeners.clear();
+  }
+
+  private findRequestForEvent(requestId: string, contextId?: string): NetworkRecord | null {
+    const exact = this.requests.get(compositeKey(contextId, requestId));
+    if (exact) return exact;
+    const matches = [...this.requests.values()].filter((request) => request.requestId === requestId);
+    return matches.length === 1 ? matches[0] : null;
   }
 }
 
@@ -226,4 +299,23 @@ export function extractRemoteValue(response: Record<string, unknown>): unknown {
 function normalizeHeaders(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object') return {};
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, String(entry)]));
+}
+
+function compositeKey(contextId: string | undefined, id: string): string {
+  return `${contextId ?? ''}\u0000${id}`;
+}
+
+function findIndexed<T extends { contextId?: string }>(
+  index: Map<string, T>,
+  id: string,
+  preferredContextId: string | undefined,
+  ambiguityCode: string,
+): T | null {
+  if (preferredContextId !== undefined) return index.get(compositeKey(preferredContextId, id)) ?? null;
+  const matches = [...index.entries()].filter(([key]) => key.endsWith(`\u0000${id}`)).map(([, value]) => value);
+  if (matches.length <= 1) return matches[0] ?? null;
+  throw new WxmpError(ambiguityCode, `${id} exists in multiple WMPF contexts`, {
+    id,
+    contextIds: [...new Set(matches.map((item) => item.contextId ?? ''))],
+  });
 }

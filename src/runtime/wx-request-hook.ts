@@ -4,7 +4,7 @@ export function buildWxRequestHookSource(): string {
   return `(() => {
   const root = globalThis;
   if (root.__wxmpRequestHook && root.__wxmpRequestHook.active) {
-    return { ok: true, reused: true };
+    return { ok: true, reused: true, status: root.__wxmpRequestHook.status ? root.__wxmpRequestHook.status() : null };
   }
   ${WX_RUNTIME_RESOLVER_SOURCE}
   const runtime = __wxmpResolveRuntime();
@@ -14,6 +14,8 @@ export function buildWxRequestHookSource(): string {
   const records = [];
   const originals = [];
   const installed = [];
+  let sequence = 0;
+  let dropped = 0;
 
   function safeString(value, maxLen) {
     if (value === undefined || value === null) return undefined;
@@ -36,7 +38,15 @@ export function buildWxRequestHookSource(): string {
   }
 
   function pushRecord(entry) {
-    if (records.length >= MAX_RECORDS) records.shift();
+    sequence += 1;
+    entry.cursor = sequence;
+    entry.requestId = 'hook-' + sequence;
+    entry.transport = entry.type === 'XMLHttpRequest' ? 'xhr' : entry.type;
+    entry.bodyEncoding = 'bounded-string-preview';
+    if (records.length >= MAX_RECORDS) {
+      records.shift();
+      dropped += 1;
+    }
     records.push(entry);
     try {
       console.debug('__WXMP_TRACE__' + JSON.stringify({
@@ -230,9 +240,37 @@ export function buildWxRequestHookSource(): string {
   root.__wxmpRequestHook = {
     active: true,
     records: records,
+    peek(cursor, limit) {
+      const parsedCursor = Number(cursor);
+      const after = Number.isSafeInteger(parsedCursor) && parsedCursor >= 0 ? parsedCursor : 0;
+      const parsedLimit = Number(limit);
+      const boundedLimit = Number.isSafeInteger(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, MAX_RECORDS)
+        : MAX_RECORDS;
+      const snapshot = records.filter(function (record) { return record.cursor > after; }).slice(0, boundedLimit);
+      return {
+        records: snapshot,
+        nextCursor: snapshot.length ? snapshot[snapshot.length - 1].cursor : after,
+        oldestCursor: records.length ? records[0].cursor : sequence + 1,
+        latestCursor: sequence,
+        dropped: dropped,
+        capacity: MAX_RECORDS,
+        active: this.active
+      };
+    },
     drain() {
-      const snapshot = records.splice(0);
-      return snapshot;
+      return this.peek(0, MAX_RECORDS).records;
+    },
+    status() {
+      return {
+        active: this.active,
+        installed: installed.slice(),
+        oldestCursor: records.length ? records[0].cursor : sequence + 1,
+        latestCursor: sequence,
+        dropped: dropped,
+        buffered: records.length,
+        capacity: MAX_RECORDS
+      };
     },
     stop() {
       for (var i = 0; i < originals.length; i++) {
@@ -241,7 +279,7 @@ export function buildWxRequestHookSource(): string {
       }
       this.active = false;
       records.length = 0;
-      return { restored: true, count: originals.length, installed: installed.slice() };
+      return { restored: true, count: originals.length, installed: installed.slice(), latestCursor: sequence, dropped: dropped };
     }
   };
 

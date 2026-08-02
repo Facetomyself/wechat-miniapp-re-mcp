@@ -89,6 +89,46 @@ export class EvidenceStore {
     return target;
   }
 
+  async writeBinary(name: string, content: Buffer, maxBytes = content.length): Promise<{
+    path: string;
+    originalBytes: number;
+    writtenBytes: number;
+    truncated: boolean;
+  }> {
+    const target = resolveInside(this.sessionRoot, 'artifacts', name);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    const writtenBytes = Math.max(0, Math.min(content.length, Math.trunc(maxBytes)));
+    await fs.writeFile(target, content.subarray(0, writtenBytes));
+    return {
+      path: target,
+      originalBytes: content.length,
+      writtenBytes,
+      truncated: writtenBytes < content.length,
+    };
+  }
+
+  async status(): Promise<Record<string, unknown>> {
+    await this.queue;
+    return {
+      schemaVersion: 1,
+      sessionId: this.sessionId,
+      sessionRoot: this.sessionRoot,
+      eventsPath: this.eventsPath,
+      eventCount: this.eventCount,
+      eventBytes: this.eventBytes,
+      queuedEventCount: this.queuedEventCount,
+      queuedEventBytes: this.queuedEventBytes,
+      droppedEventCount: this.droppedEventCount,
+      droppedEventBytes: this.droppedEventBytes,
+      truncatedEventCount: this.truncatedEventCount,
+      corruptLineCount: this.corruptLineNumbers.size,
+      maxEvents: this.maxEvents,
+      maxBytes: this.maxBytes,
+      maxEventBytes: this.maxEventBytes,
+      lastWriteError: this.lastWriteError,
+    };
+  }
+
   async readEvents(offset = 0, limit = 100, type?: string): Promise<{ total: number; items: AuditEvent[] }> {
     await this.queue;
     const safeOffset = Math.max(0, Math.trunc(offset));

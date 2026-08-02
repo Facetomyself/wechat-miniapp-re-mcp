@@ -84,3 +84,19 @@ test('evidence store bounds event bytes and skips malformed NDJSON lines during 
   assert.ok(findings.some((finding) => finding.id === 'evidence-corrupt-lines'));
   await fs.rm(root, { recursive: true, force: true });
 });
+
+test('evidence store writes bounded binary protocol artifacts and reports live status', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-evidence-'));
+  const store = new EvidenceStore(root, 'fixture', 'session-binary');
+  await store.init();
+  const written = await store.writeBinary('protocol/1-custom.bin', Buffer.from('0123456789'), 4);
+  assert.equal(written.originalBytes, 10);
+  assert.equal(written.writtenBytes, 4);
+  assert.equal(written.truncated, true);
+  assert.equal((await fs.readFile(written.path)).toString('utf8'), '0123');
+  await store.append('fixture.event', { ok: true });
+  const status = await store.status();
+  assert.equal(status.eventCount, 1);
+  assert.equal(status.sessionId, 'session-binary');
+  await fs.rm(root, { recursive: true, force: true });
+});

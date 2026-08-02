@@ -1,5 +1,5 @@
 import { WxmpError } from '../errors.js';
-import { ToolEntry } from './types.js';
+import { ToolEntry, ToolOptions } from './types.js';
 
 type Schema = Record<string, unknown>;
 export const stringProp = (description: string): Schema => ({ type: 'string', description });
@@ -10,8 +10,52 @@ export function objectSchema(properties: Record<string, Schema>, required: strin
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
-export function entry(name: string, description: string, inputSchema: Schema, handler: ToolEntry['handler']): ToolEntry {
-  return { tool: { name, description, inputSchema: inputSchema as ToolEntry['tool']['inputSchema'] }, handler };
+const OUTPUT_SCHEMA: NonNullable<ToolEntry['tool']['outputSchema']> = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean' },
+    data: {},
+    error: {
+      type: 'object',
+      properties: {
+        code: { type: 'string' },
+        message: { type: 'string' },
+        details: { type: 'object', additionalProperties: true },
+      },
+      required: ['code', 'message', 'details'],
+      additionalProperties: false,
+    },
+    retryable: { type: 'boolean' },
+    needsUserAction: { type: 'boolean' },
+    missingCapability: { type: 'string' },
+    userAction: { type: 'string' },
+    nextActions: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['ok'],
+  additionalProperties: false,
+};
+
+export function entry(
+  name: string,
+  description: string,
+  inputSchema: Schema,
+  handler: ToolEntry['handler'],
+  options: ToolOptions = {},
+): ToolEntry {
+  const title = options.title ?? titleFromName(name);
+  const annotations = options.annotations ?? inferAnnotations(name, title);
+  return {
+    tool: {
+      name,
+      title,
+      description,
+      inputSchema: inputSchema as ToolEntry['tool']['inputSchema'],
+      outputSchema: options.outputSchema ?? OUTPUT_SCHEMA,
+      annotations,
+    },
+    handler,
+    visibility: options.visibility ?? 'expert',
+  };
 }
 
 export function text(args: Record<string, unknown>, key: string, required = true): string {
@@ -57,8 +101,35 @@ export function stringArray(args: Record<string, unknown>, key: string): string[
 }
 
 export function result(data: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: true, data }, null, 2) }] };
+  const structuredContent = { ok: true, data };
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(structuredContent, null, 2) }],
+    structuredContent,
+  };
 }
 
 export function safeFile(value: string): string { return value.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120); }
 export function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function titleFromName(name: string): string {
+  return name
+    .replace(/^wxmp_/, '')
+    .split('_')
+    .map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : part)
+    .join(' ');
+}
+
+function inferAnnotations(name: string, title: string) {
+  const readOnly = /_(health|doctor|status|info|list|search|scan|probe|snapshot|get|query|detect|validate)(?:_|$)/.test(name)
+    && !/_(build_index|open|observe)/.test(name);
+  const destructive = /_(close|detach|remove(?:_|$)|repack|promote|call(?:_|$)|replay|evaluate$|raw_cdp|raw_adapter|set_breakpoint|pause$|resume$|step_)/.test(name);
+  const idempotent = readOnly;
+  const openWorld = /_(attach|open|wait|capture|trace|hook|request|cloud|api|evaluate|debugger|decompile|unpack|repack|raw|proxy)/.test(name);
+  return {
+    title,
+    readOnlyHint: readOnly,
+    destructiveHint: destructive,
+    idempotentHint: idempotent,
+    openWorldHint: openWorld,
+  };
+}

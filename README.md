@@ -6,8 +6,9 @@
 
 <p align="center">
   <a href="https://github.com/Facetomyself/wechat-miniapp-re-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Facetomyself/wechat-miniapp-re-mcp/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.3.1-2563eb">
-  <img alt="MCP tools" src="https://img.shields.io/badge/MCP_tools-53-0f766e">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-2563eb">
+  <img alt="Agent tools" src="https://img.shields.io/badge/Agent_tools-16-0f766e">
+  <img alt="Expert tools" src="https://img.shields.io/badge/Expert_tools-59-475569">
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
@@ -22,13 +23,18 @@
 
 ## 项目简介
 
-`wechat-miniapp-re-mcp` 是一个面向 PC 微信小程序运行时（WMPF）和 `.wxapkg` 包的 Model Context Protocol（MCP）服务。它把目标发现、Frida lazy attach、WMPF protobuf/CDP bridge、JavaScript 调试、网络与 API 取证、静态还原、Profile 生命周期以及证据导出统一到一组 `wxmp_*` 工具中。
+`wechat-miniapp-re-mcp` 是一个面向 PC 微信小程序运行时（WMPF）和 `.wxapkg` 包的 agent-first Model Context Protocol（MCP）服务。默认 surface 不再把几十个底层命令直接倾倒给模型，而是以 `wxmp_open` 为统一入口，自动完成 target/Profile/session/runtime/context/observation/snapshot/package correlation；需要 raw CDP、断点、Profile 或 adapter 下钻时再显式启用 expert toolset。
 
 项目重点不是“返回一个看似成功的结果”，而是让每项动态能力都由实际探测结果支撑：
 
 - stdio 服务可冷启动，启动阶段不依赖微信、Frida target、GUI、浏览器或 SSE；
+- 默认只暴露 16 个 agent tools；`WXMP_TOOLSET=expert` 保留完整 59-tool surface；
+- server 原生发布 instructions、3 个 prompts、resources/templates、tool annotations 与 structured output；
 - 动态操作使用显式 `session_id`，上下文相关操作进一步使用 `context_id`；
+- WMPF logical context 与 CDP execution context 分层建图，script/request 使用复合索引；
 - WMPF bridge 连通只代表 transport ready，Debugger、Network、trace、request hook 等能力需分别通过探测；
+- request hook 使用 non-destructive cursor/peek；replay 优先保持原 transport 并报告 semantic downgrade；
+- 未知 WMPF envelope 保存 SHA-256、bounded preview 和 workspace binary artifact，不再静默丢 payload；
 - 生成的 Profile 必须绑定目标模块 SHA-256，并经过 review evidence promotion 后才进入注入链；
 - 静态后端通过 adapter 隔离，核心仓库保持 clean-room 与 MIT 边界；
 - 所有运行产物统一写入受控 workspace，并可导出 `report.md`、`findings.json`、`triage.md` 与 evidence manifest。
@@ -82,7 +88,9 @@ flowchart LR
 | `SessionManager` | 管理 session、target、context、capability、Frida handle、bridge owner 与 reconnect 生命周期 |
 | `FridaRuntimeAdapter` | lazy import Frida，向 reviewed offset 安装 WMPF hook，并将运行时事件写入 evidence |
 | `WmpfBridgeServer` | 监听本地 WMPF debug bridge；采用 fail-safe single-owner，不猜测无握手协议下的 socket 归属 |
-| `CdpChannel` | 配对 CDP command/response，索引 script、request、context、pause 与 trace event |
+| `AgentWorkflow` | 编排 `doctor/open/status/snapshot/observe/close`，自动恢复 runtime 并隐藏常规 context 选择 |
+| `CdpChannel` | 配对 CDP command/response，以 WMPF context + local ID 索引 script/request，并独立维护 CDP execution context |
+| `MCP catalog` | 发布 instructions、prompts、resources/templates、双 toolset 与结构化 tool contract |
 | `ProfileManager` | 装载 canonical profile、扫描 AOB、校验 hash/bounds、阻断 candidate 注入并记录 promotion evidence |
 | `StaticAdapter` | 在受控 workspace 内调用 Gwxapkg，覆盖 decompile、search、index、repack 和 raw adapter |
 | `EvidenceStore` | 持久化 NDJSON、限制 event/byte 容量、脱敏字段、记录异常并生成三件套 |
@@ -93,11 +101,12 @@ flowchart LR
 
 MCP 进程启动时只初始化轻量服务。微信进程发现、Frida、bridge、CDP、静态后端均在工具调用时按需加载。`wxmp_health` 在没有目标进程的环境中也应正常返回。
 
-### 2. Session 与 Context 显式隔离
+### 2. Session 与两层 Context 显式隔离
 
 - 每次 attach 产生独立 `session_id`；
-- context-sensitive 工具接受 `context_id`，省略时使用当前 selected context；
-- script 和 request 会保留其来源 `contextId`；
+- Agent workflow 自动选择已探测的 WMPF logical context；expert context-sensitive 工具仍接受显式 `context_id`；
+- WMPF `jscontextId` 与 CDP `Runtime.executionContextId` 不混用，context graph 保存关联边与 provenance；
+- script 和 request 以 `WMPF context + local ID` 作为复合索引；
 - WMPF 未提供 context 的事件按 unscoped 处理，并回退到 selected context；
 - 历史 session 可并存，但共享 `127.0.0.1:9421` bridge 同一时刻只分配一个 active/pending owner。
 
@@ -129,8 +138,9 @@ generated candidate 的默认 confidence 为 `candidate`。在以下条件全部
 | 能力 | 状态 | 证据边界 |
 |---|---|---|
 | stdio cold start / initialize / list-tools / health | 已通过 | 无微信、无 Frida target 环境可运行 |
-| MCP tool contract | 已通过 | `53` 个 `wxmp_*` tools |
-| Node.js 20 / 22 CI | 已通过 | `99` tests、typecheck、contract、acceptance、smoke |
+| MCP agent/expert contract | 已通过 | 默认 `16` 个 agent tools；expert `59` 个 tools；instructions/prompts/resources/structured output |
+| Node.js 20 / 22 CI | 本地门禁已通过 | `107` tests、typecheck、contract、acceptance、双 toolset stdio smoke；CI 待本分支提交后复核 |
+| v0.4.0 agent-first runtime workflow | static-verified / runtime-pending | workflow、context graph、protocol recorder、cursor hook、same-transport replay 已有 fixture；待真实 WMPF semantic gate |
 | WMPF v19977 动态语义链 | 已通过 | AppService、evaluate、真实 breakpoint、727 trace wrappers、request hook、Network body、replay、reconnect、detach、evidence export |
 | WMPF v20079 Profile 交叉验证 | 已通过 | AOB 唯一命中、SHA-256、bounds、reviewed profile、生产 hook attach/ready/detach |
 | WMPF v20079 完整 mini-program semantic gate | 待补齐 | AppService/CDP/Network/trace/request-hook/replay/reconnect 尚待同序列验证 |
@@ -234,6 +244,7 @@ WXMP_GWXAPKG = "D:\\reverse_ENV\\tools\\Gwxapkg-runtime\\gwxapkg.exe"
 
 | 变量 | 默认值 / 解析规则 | 用途 |
 |---|---|---|
+| `WXMP_TOOLSET` | `agent` | `agent` 暴露 16 个高层工具；显式设为 `expert` 才暴露完整 59 个工具 |
 | `REVERSE_ENV_ROOT` | 未设置 | 提供 `reverse_ENV` 根目录，用于 workspace 与 Gwxapkg fallback |
 | `WXMP_WORKSPACE_ROOT` | 优先 `<cwd>/workspace`，其次 `REVERSE_ENV_ROOT/workspace`，最后 `<cwd>/.wxmp-workspace` | 所有 session、profile、static 与 evidence 产物根目录 |
 | `WXMP_PROFILE_DIR` | bundled clean-room profile 自动加入 | 额外 Profile 目录；支持按操作系统 path delimiter 传入多个路径 |
@@ -245,31 +256,40 @@ WXMP_GWXAPKG = "D:\\reverse_ENV\\tools\\Gwxapkg-runtime\\gwxapkg.exe"
 | `WXMP_EVENT_LIMIT` | `5000` | 单次 evidence query 最大事件数 |
 | `WXMP_MAX_EVIDENCE_EVENTS` | `100000` | 单 session 持久化事件上限 |
 | `WXMP_MAX_EVIDENCE_BYTES` | `268435456` | 单 session NDJSON 字节上限，默认 256 MiB |
+| `WXMP_PROTOCOL_PREVIEW_BYTES` | `2048` | 未知/失败 WMPF envelope 的 Base64 preview 原始字节数，最大 64 KiB |
+| `WXMP_MAX_PROTOCOL_ARTIFACT_BYTES` | `8388608` | 单个未知协议 binary artifact 写入上限，最大 64 MiB |
 
 ## 推荐工作流
 
-### 动态 WMPF 调试
+### 默认 Agent workflow
 
 ```text
-wxmp_health
-  -> wxmp_list_targets
-  -> wxmp_attach(project_name, pid?)
-  -> wxmp_wait_for_runtime(session_id)          # lifecycle-triggered bridge 尚未出现时
-  -> wxmp_probe_contexts(session_id)
-  -> wxmp_select_context(session_id, context_id)
-  -> evaluate / source / breakpoint / trace / network / replay
-  -> wxmp_export_evidence(session_id)
-  -> wxmp_detach(session_id)
+wxmp_doctor
+  -> wxmp_open(project_name?, pid?)
+  -> wxmp_open(session_id)                       # 仅当返回 needs_user_action；前台/重载后恢复同一 session
+  -> wxmp_app_snapshot(session_id)
+  -> wxmp_observe_window(session_id)
+  -> wxmp_get_api_inventory(session_id, include_hooks=true)
+  -> wxmp_search_sources / wxmp_replay_request
+  -> wxmp_close(session_id)                      # restore + detach + evidence export
 ```
 
 关键点：
 
-- `wxmp_attach` 未传 `pid` 时，默认选择 main WMPF browser process；
-- `project_name` 决定 evidence 输出目录；
-- mini-program selector 或 foreground/reload 可能触发 WMPF debug bridge 生命周期；
-- unexpected disconnect 会保留 MCP session、evidence 和 context listener，并重新排队同一 bridge owner；
-- reconnect 使用 `wxmp_wait_for_runtime`，无需重复注入 Frida；
-- attach 后先运行 `wxmp_probe_contexts`，再选择最强 AppService / wx-capable context。
+- `wxmp_open` 未传 `pid` 时选择 main WMPF process，未传 `project_name` 时使用 AppID 或 PID；
+- Profile load/probe、attach、runtime wait、context probe、request hook、snapshot 和 package correlation 由一个 domain workflow 完成；
+- mini-program foreground/reload 尚未触发 bridge 时，session 保留并返回明确 `userAction/nextActions/resumeTool/resumeArguments`；首次 attach 已完成等待后不会在同一次 `wxmp_open` 中重复等待；
+- unexpected disconnect 保留 evidence 与 context listener，恢复时使用原 `session_id`，无需重复注入 Frida；
+- 常规工具隐藏 context 选择，expert 工具才要求操作者显式下钻。
+
+### Expert 动态调试
+
+```text
+WXMP_TOOLSET=expert
+wxmp_attach -> wxmp_wait_for_runtime -> wxmp_probe_contexts -> wxmp_select_context
+  -> evaluate / source / breakpoint / trace / network / raw CDP
+  -> wxmp_export_evidence -> wxmp_detach
+```
 
 ### 源码与断点
 
@@ -308,9 +328,11 @@ wxmp_capture_start
 
 - trace 以 reversible wrapper 覆盖 `wx.*`、cloud、storage、navigation 和 network 分类；
 - `wrapped=0` 返回 `TRACE_TARGET_UNAVAILABLE`；
-- request hook 覆盖 `wx.request`、`fetch`、`XMLHttpRequest`，保存 bounded body preview 与 JavaScript call stack；
+- request hook 覆盖 `wx.request`、`fetch`、`XMLHttpRequest`，保存 bounded body preview、JavaScript call stack、transport 与单调 cursor；
+- Hook 读取与 API inventory 使用 `peek(cursor, limit)`，不会互相消费数据，只有 stop 才释放 buffer；
 - CDP Network 与 request hook 是互补证据源；
-- response body 与 replay 使用 request 的 originating context；unscoped WMPF event 回退到 selected context。
+- replay 对 `wx.request` / `fetch` / XHR 保持 same transport；CDP-only 记录回退 `fetch` 并返回 `semanticDowngrade`；
+- response body 与 replay 使用 request 的 originating WMPF context；复合 ID 歧义不会静默猜测。
 
 ### 静态 `.wxapkg` 工作流
 
@@ -353,19 +375,31 @@ Profile 分为三类：
 <workspace>/<project>/wechat-miniapp/profiles/windows-<version>-candidate.json
 ```
 
-## 53 个 MCP Tools
+## 默认 16 个 Agent Tools
 
 | 分组 | 数量 | Tools |
 |---|---:|---|
-| Health / Session / Context | 11 | `wxmp_health`, `wxmp_list_targets`, `wxmp_list_sessions`, `wxmp_attach`, `wxmp_detach`, `wxmp_session_status`, `wxmp_wait_for_runtime`, `wxmp_list_contexts`, `wxmp_select_context`, `wxmp_probe_contexts`, `wxmp_get_runtime_info` |
-| Runtime / Source / Debugger | 13 | `wxmp_evaluate`, `wxmp_raw_cdp`, `wxmp_list_scripts`, `wxmp_get_source`, `wxmp_search_sources`, `wxmp_set_breakpoint`, `wxmp_remove_breakpoint`, `wxmp_pause_info`, `wxmp_pause`, `wxmp_step_over`, `wxmp_step_into`, `wxmp_step_out`, `wxmp_resume` |
-| Trace / Network / Runtime API | 14 | `wxmp_trace_start`, `wxmp_trace_query`, `wxmp_trace_stop`, `wxmp_hook_wx_request`, `wxmp_get_hooked_requests`, `wxmp_unhook_wx_request`, `wxmp_capture_start`, `wxmp_capture_stop`, `wxmp_list_requests`, `wxmp_get_request`, `wxmp_get_api_inventory`, `wxmp_replay_request`, `wxmp_call_wx_api`, `wxmp_call_cloud_function` |
-| Human DevTools Bridge | 2 | `wxmp_devtools_proxy_start`, `wxmp_devtools_proxy_stop` |
-| Static Package | 7 | `wxmp_scan_packages`, `wxmp_unpack`, `wxmp_decompile`, `wxmp_static_search`, `wxmp_build_index`, `wxmp_repack`, `wxmp_raw_adapter` |
-| Profile | 5 | `wxmp_detect_wmpf`, `wxmp_profile_probe`, `wxmp_profile_generate`, `wxmp_profile_validate`, `wxmp_profile_promote` |
-| Evidence | 1 | `wxmp_export_evidence` |
+| Workflow | 6 | `wxmp_doctor`, `wxmp_open`, `wxmp_status`, `wxmp_app_snapshot`, `wxmp_observe_window`, `wxmp_close` |
+| Runtime / Network | 5 | `wxmp_search_sources`, `wxmp_list_requests`, `wxmp_get_request`, `wxmp_get_api_inventory`, `wxmp_replay_request` |
+| Static | 3 | `wxmp_scan_packages`, `wxmp_decompile`, `wxmp_static_search` |
+| Health / Evidence | 2 | `wxmp_health`, `wxmp_export_evidence` |
 
-每个 tool 的参数、约束与返回语义见 [`docs/api.md`](docs/api.md)。
+## 完整 59 个 Expert Tools
+
+Expert surface 包含以上 16 个 agent tools，以及原有 43 个 session/context、raw CDP、debugger、trace、adapter、Profile 与 DevTools proxy 原语。按实现来源统计：
+
+| 分组 | 数量 |
+|---|---:|
+| Agent workflow 新增 | 6 |
+| Health / Session / Context | 11 |
+| Runtime / Source / Debugger | 13 |
+| Trace / Network / Runtime API | 14 |
+| Human DevTools Bridge | 2 |
+| Static Package | 7 |
+| Profile | 5 |
+| Evidence | 1 |
+
+每个 tool 的参数、约束、annotations 与返回语义见 [`docs/api.md`](docs/api.md)。
 
 ## Workspace 与证据产物
 
@@ -452,11 +486,12 @@ git diff --check
 3. MCP tool/API/version contract + acceptance records；
 4. stdio initialize/list-tools/health smoke。
 
-CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，使用 Node.js 20 与 22 matrix。当前基线为：
+CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，使用 Node.js 20 与 22 matrix。v0.4.0 本地基线为：
 
-- `99` tests；
-- `53` MCP tools；
-- production dependency audit：`0 vulnerabilities`（以最近一次审计为准）。
+- `107` tests；
+- 默认 `16` agent tools / 完整 `59` expert tools；
+- 3 prompts、2 个固定 resources、3 个 resource templates；
+- production dependency audit：`0 vulnerabilities`（SDK `1.30.0`、`@hono/node-server` `2.0.12`、`fast-uri` `3.1.4`、`brace-expansion` `5.0.8`）。
 
 ### Acceptance 与真实 target gate
 
@@ -469,7 +504,7 @@ CI 位于 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)，使用 Node.j
 & "D:\reverse_ENV\tools\node\npm.cmd" run live-gate -- --wmpf-version 20079
 ```
 
-runner 固定执行 Profile/AOB、attach/bridge、AppService、evaluate、breakpoint、API inventory、trace、request hook、Network body、replay、reconnect、detach 和 evidence export。失败也会生成结构化 summary 与三件套 evidence；`--skip-reconnect` 只能用于缩减诊断，不能形成 `full-semantic` acceptance。
+runner 固定强制使用 `WXMP_TOOLSET=expert`，执行 Profile/AOB、attach/bridge、AppService、evaluate、breakpoint、API inventory、trace、request hook、Network body、replay、reconnect、detach 和 evidence export。失败也会生成结构化 summary 与三件套 evidence；`--skip-reconnect` 只能用于缩减诊断，不能形成 `full-semantic` acceptance。
 
 ### 提交规则
 
@@ -494,7 +529,7 @@ runner 固定执行 Profile/AOB、attach/bridge、AppService、evaluate、breakp
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/api.md`](docs/api.md) | 53 个 MCP tools 的参数与关键语义 |
+| [`docs/api.md`](docs/api.md) | 16/59 双 toolset、prompts/resources 与关键语义 |
 | [`docs/progress.md`](docs/progress.md) | 实现完成度、真实 target gate 与剩余项 |
 | [`docs/roadmap.md`](docs/roadmap.md) | 当前后续完善路线图、优先级与验收门槛 |
 | [`docs/plan.md`](docs/plan.md) | 初始交付计划与 locked decisions，主体阶段已完成 |
@@ -505,8 +540,8 @@ runner 固定执行 Profile/AOB、attach/bridge、AppService、evaluate、breakp
 
 ## Roadmap
 
-- `0.3.2`：建立可重复 live semantic gate，在 v20079 完成第二版本完整验证，并收口 acceptance manifest 与文档事实源；
-- `0.4.0`：补齐 structured output、tool annotations、Inspector gate，以及调用栈/作用域/XHR breakpoint/WebSocket/WASM 等调试原语；
+- `0.4.0`：agent-first bootstrap、双 toolset、MCP instructions/prompts/resources、structured output、context graph、protocol recorder、cursor hook、same-transport replay，以及 MCP SDK `1.30.0` 依赖安全闭环（已实现，真实 WMPF 新链路待 repeat gate）；
+- `0.4.x`：补齐调用栈/作用域/XHR breakpoint/WebSocket/WASM 等 expert debugger 原语，并在 v20079 完成新 workflow repeat gate；
 - `0.5.0`：完善 evidence 分层、静态索引 v2、runtime/static correlation 和外部 Profile candidate import contract；
 - `1.0.0-rc`：完成架构拆分、关键状态机覆盖率、跨平台 core CI、release/tag/changelog 与兼容性冻结。
 
@@ -581,28 +616,18 @@ Minimal MCP JSON configuration:
 ### Recommended dynamic sequence
 
 ```text
-wxmp_health
-  -> wxmp_list_targets
-  -> wxmp_attach
-  -> wxmp_wait_for_runtime (when needed)
-  -> wxmp_probe_contexts
-  -> wxmp_select_context
-  -> debugger / trace / network tools
-  -> wxmp_export_evidence
-  -> wxmp_detach
+wxmp_doctor
+  -> wxmp_open
+  -> wxmp_open(session_id) when a foreground/reload transition is requested
+  -> wxmp_app_snapshot / wxmp_observe_window / wxmp_get_api_inventory
+  -> wxmp_close
 ```
 
 ### Tool inventory
 
-The server currently exposes `53` tools:
+The default surface exposes `16` agent tools. Set `WXMP_TOOLSET=expert` only when raw CDP, breakpoint, Profile, or adapter primitives are needed; the expert surface exposes `59` tools.
 
-- 11 health/session/context tools;
-- 13 runtime/source/debugger tools;
-- 14 trace/network/runtime-API tools;
-- 2 DevTools proxy tools;
-- 7 static package tools;
-- 5 profile lifecycle tools;
-- 1 evidence export tool.
+The normal flow is `wxmp_doctor -> wxmp_open -> wxmp_app_snapshot / wxmp_observe_window / wxmp_get_api_inventory -> wxmp_close`. If the WMPF lifecycle bridge has not fired, `wxmp_open` preserves the session and returns a concrete foreground/reload action plus the same `session_id` for recovery.
 
 See [`docs/api.md`](docs/api.md) for the complete API reference.
 
@@ -611,7 +636,7 @@ See [`docs/api.md`](docs/api.md) for the complete API reference.
 | Area | Status |
 |---|---|
 | stdio cold start, contract, smoke | Verified |
-| Node.js 20 and 22 CI | Verified, 99 tests |
+| Node.js 20 and 22 CI | v0.3.1 verified; v0.4.0 local gate passes 107 tests and awaits branch CI |
 | WMPF v19977 full live semantic workflow | Verified |
 | WMPF v20079 profile/AOB/hash binding and production attach/detach | Verified |
 | WMPF v20079 full mini-program semantic workflow | Pending repeat gate |

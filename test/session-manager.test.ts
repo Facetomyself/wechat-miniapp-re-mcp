@@ -11,6 +11,7 @@ import type { DevToolsProxy } from '../src/transport/devtools-proxy.js';
 
 function mockConfig(workspaceRoot: string): AppConfig {
   return {
+    toolset: 'agent',
     workspaceRoot,
     profileDirs: [],
     legacyProfileDirs: [],
@@ -21,6 +22,8 @@ function mockConfig(workspaceRoot: string): AppConfig {
     eventLimit: 5000,
     maxEvidenceEvents: 100_000,
     maxEvidenceBytes: 256 * 1024 * 1024,
+    protocolPreviewBytes: 2048,
+    maxProtocolArtifactBytes: 8 * 1024 * 1024,
   };
 }
 
@@ -92,6 +95,7 @@ async function createSession(
     findings: [],
     traceContextIds: new Set(),
     requestHookContextIds: new Set(),
+    networkContextIds: new Set(['*']),
     runtimeGeneration: 0,
   };
 }

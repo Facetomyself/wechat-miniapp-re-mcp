@@ -2,15 +2,19 @@
 
 > 状态：当前后续规划的 canonical source。
 >
-> 最近更新：2026-07-18
+> 最近更新：2026-07-29
 >
-> 适用基线：`main` / `0.3.1` / commit `26ef996`
+> 适用基线：`fix/project-review-p0` / `0.4.0` working tree；本地 static/unit/contract gate 已通过，真实 target 新链路尚未验收
 
 当前实施状态：
 
 - [x] `data/acceptance` schema、v19977/v20079 records 与 hash/depth checker；
 - [x] package/source/build version、README tool count、`docs/api.md` tool inventory drift gate；
 - [x] tracked `scripts/live-semantic-gate.mjs`、dry-run/路径门禁/结构化失败 evidence；
+- [x] 16/59 双 toolset、`wxmp_open` agent workflow、instructions/prompts/resources 与 structured output；
+- [x] WMPF/CDP context graph、复合索引、未知协议 bounded recorder、non-destructive Hook cursor 与 same-transport replay；
+- [x] 107 个本地 tests、精确 contract 与双 toolset stdio smoke；
+- [ ] v0.4.0 agent-first workflow 的真实 WMPF repeat gate；
 - [ ] v19977 新 runner 的完整 repeat pass（2026-07-18 当前尝试因 lifecycle 未触发停在 `runtimeBridge`，failure evidence 已闭环）；
 - [ ] v20079 真实 target 与 3 次完整 semantic gate。
 
@@ -31,15 +35,15 @@
 
 | 维度 | 当前状态 | 证据 |
 |---|---|---|
-| MCP surface | `53` 个 `wxmp_*` tools | `npm run contract` / `npm run smoke` |
-| 自动化测试 | `99` tests，全部通过 | `npm run check` |
+| MCP surface | 默认 `16` agent tools；完整 `59` expert tools；3 prompts；2 fixed resources + 3 templates | `npm run contract` / `npm run smoke` |
+| 自动化测试 | `107` tests，本地全部通过 | `npm test`；完整 `npm run check` 见本次验证记录 |
 | 代码覆盖率 | Node.js 22 下 overall line `76.79%`（已包含 tracked acceptance/live scripts） | `node --experimental-test-coverage --test ...` |
 | 关键低覆盖模块 | `sessions/manager.js` `34.64%`；`frida-adapter.js` `62.69%`；`dynamic.js` `54.11%` | Node.js 22 coverage report |
 | 动态链 | WMPF v19977 完整 semantic gate 已通过 | [`progress.md`](progress.md) |
 | 第二版本 | WMPF v20079 Profile/AOB/hash/attach/detach 已通过，完整 semantic gate 未完成 | [`progress.md`](progress.md) |
 | 静态链 | subprocess decompile/search/index/repack 与失败门禁已通过 | `test/static-adapter.test.ts` |
-| CI | Windows Node.js 20/22，最近 Actions 全绿 | [GitHub Actions](https://github.com/Facetomyself/wechat-miniapp-re-mcp/actions) |
-| 依赖审计 | production vulnerabilities `0` | `npm audit --omit=dev`，2026-07-18 |
+| CI | v0.3.1 Windows Node.js 20/22 已绿；v0.4.0 分支 CI 待提交后复核 | [GitHub Actions](https://github.com/Facetomyself/wechat-miniapp-re-mcp/actions) |
+| 依赖审计 | production vulnerabilities `0`；SDK `1.30.0` / Hono adapter `2.0.12` | `npm audit --omit=dev`，2026-07-29 |
 | 发布 | 无 Git tag、无 GitHub Release | Git/GitHub repository metadata |
 
 ### 2.2 当前事实源层级
@@ -80,17 +84,16 @@
 
 | 优先级 | 主题 | 目标版本 | 结果 |
 |---|---|---|---|
-| P0 | 第二版本 semantic gate 与 live harness | `0.3.2` | 当前能力从单次事实变成可重复验收 |
-| P0 | 文档/版本/工具清单事实源治理 | `0.3.2` | 消除旧数字、旧结论和版本漂移 |
-| P1 | MCP structured contract 与 annotations | `0.4.0` | Agent 更容易正确调用，客户端可识别读写/破坏性 |
-| P1 | Debugger 高频原语 | `0.4.0` | 调用栈、作用域、XHR breakpoint、WebSocket、WASM 闭环 |
-| P1 | Evidence 分层与脱敏 | `0.4.0` | 兼顾本地取证完整性和安全导出 |
+| P0 | v0.4.0 agent workflow + 第二版本 semantic gate | `0.4.1` | 把 fixture/static 结论升级为可重复真实验收 |
+| 已交付 | Agent-first surface、MCP structured contract、context/protocol/request 改造 | `0.4.0` | 默认工作流不再依赖手工拼 53 个底层工具 |
+| P1 | Debugger 高频原语 | `0.4.x` | 调用栈、作用域、XHR breakpoint、WebSocket、WASM 闭环 |
+| P1 | Evidence 分层与脱敏 | `0.5.0` | 兼顾本地取证完整性和安全导出 |
 | P1 | 静态/动态关联与 Profile candidate import | `0.5.0` | 形成区别于纯 CDP MCP 的完整逆向闭环 |
 | P2 | 架构拆分、覆盖率和跨平台 CI | `0.5.x` | 降低状态机、Frida 和大型 tool 文件的维护风险 |
 | P2 | Release/compatibility discipline | `1.0.0-rc` | 可回滚、可追踪、可对外复现 |
 | 条件项 | macOS runtime、MCP SDK v2 正式迁移 | 独立里程碑 | 只在真实环境和上游稳定后推进 |
 
-## 5. Phase R0：验收与事实源收口（P0，目标 `0.3.2`）
+## 5. Phase R0：验收与事实源收口（历史 foundation 已交付，live repeat 持续）
 
 ### R0.1 可重复 live semantic gate
 
@@ -134,11 +137,20 @@
 - 仓库内不再同时出现互相冲突的当前 tool/test/version 数字。
 - 新增/删除/改 schema 时，CI 能提示 README/API/contract 未同步。
 
-## 6. Phase R1：MCP contract 与调试器体验（P1，目标 `0.4.0`）
+## 6. Phase R1：Agent-first MCP contract 与调试器体验
+
+### R1.0 Agent entrypoint 与双 surface（v0.4.0 已交付）
+
+- `wxmp_open` 编排 target/Profile/attach/runtime/context/hook/snapshot/package correlation；未连接时保留 session，避免同次调用重复等待，并返回可机器续跑的 tool/arguments。
+- 默认精确暴露 16 个 agent tools，`WXMP_TOOLSET=expert` 暴露完整 59 个 tools。
+- MCP 原生 instructions、3 prompts、server/session/context-graph/evidence resources 已发布。
+- `wxmp_doctor/status/observe_window/close` 补齐诊断、恢复、观察与清理闭环。
+
+验收边界：unit/contract/stdio 已通过；真实 WMPF 新 workflow 为 runtime-pending。
 
 ### R1.1 Structured output 和 tool metadata
 
-当前所有成功结果主要包在 text JSON 中，虽然 SDK v1.29.0 已支持 `outputSchema`、`structuredContent` 和 `annotations`，项目尚未使用。
+v0.4.0 已同时提供 text JSON 与 `structuredContent`，并使用 SDK v1.30.0 的 `outputSchema` 和 `annotations`。
 
 交付：
 
@@ -150,7 +162,7 @@
 
 验收：
 
-- 53 个工具全部有 output contract 和 annotations；contract test 校验缺失项。
+- 59 个工具全部有 output contract 和 annotations；contract test 校验缺失项。
 - MCP client 集成测试断言 `structuredContent`，同时保留旧 text content 的兼容性。
 - package version 与 `src/version.ts` 只保留一个事实源或由 CI 强制一致。
 
@@ -167,7 +179,7 @@
 - Inspector CLI gate 可在 CI 无微信环境运行。
 - conformance 若暂不能直接覆盖 stdio，记录 expected gap 和上游限制，不用“自测通过”冒充官方 conformance。
 
-### R1.3 Debugger 高频原语
+### R1.3 Debugger 高频原语（目标 `0.4.x`）
 
 按下面顺序实现，避免先堆分析型工具：
 
@@ -240,7 +252,7 @@
 
 ### R3.1 模块拆分与测试 seam
 
-当前 `src/sessions/manager.ts` 为 619 行，承担 attach、state、context、capability、finding、reconnect 和 Frida detach；`src/tools/dynamic.ts` 同时承载 source/debugger/trace/network/call/proxy。继续堆功能会明显放大回归面。
+当前 `src/sessions/manager.ts` 已接近 800 行，承担 attach、state、context、capability、finding、reconnect 和 Frida detach；`src/tools/dynamic.ts` 同时承载 source/debugger/trace/network/call/proxy。继续堆功能会明显放大回归面。
 
 交付：
 
@@ -280,7 +292,7 @@
 
 验收：
 
-- `0.3.2` 起每个发布都能从 tag 重建、运行 `npm ci && npm run check`，并找到对应 acceptance 状态。
+- `0.4.1` 起每个发布都能从 tag 重建、运行 `npm ci && npm run check`，并找到对应 acceptance 状态。
 - 不再出现 package version、server version、README 和 Git tag 四套版本号各说各话。
 
 ## 9. 条件路线与明确不做
@@ -291,7 +303,7 @@
 
 ### 9.2 MCP SDK v2 / 2026-07-28 protocol
 
-上游 v2 仍为 beta。先完成 v1.29 可用的 structured output、annotations 和 integration tests；待 v2 稳定后使用官方 codemod，在独立分支验证 legacy stdio compatibility，再决定是否通过 `serveStdio()` 同时支持新旧 era。
+当前稳定基线为 SDK v1.30.0，structured output、annotations 和 integration tests 已在该基线闭环。上游 v2 仍为 beta；待其稳定后使用官方 codemod，在独立分支验证 legacy stdio compatibility，再决定是否通过 `serveStdio()` 同时支持新旧 era。v2 migration 不得与 live runtime gate、公共 schema 扩展或架构拆分混在同一批次。
 
 ### 9.3 不进入 MCP core 的能力
 
@@ -301,19 +313,53 @@
 - 在 handshake-free `127.0.0.1:9421` 上伪造并发多 runtime 支持；继续 fail-safe single-owner。
 - 未经 review 的 Profile 自动注入，或在 extractor 失败时回退历史 offset。
 
-## 10. 建议实施顺序
+## 10. 下一执行批次
 
-1. `0.3.2-a`：文档事实源、version drift check、acceptance manifest schema。
-2. `0.3.2-b`：live gate runner、v20079 完整 semantic gate、attach/reconnect 采样。
-3. `0.4.0-a`：structured output、annotations、Inspector CLI gate。
-4. `0.4.0-b`：paused state/scopes/frame evaluation/XHR breakpoint。
-5. `0.4.0-c`：WebSocket、WASM、request initiator、evidence redaction v2。
-6. `0.5.0-a`：static index v2 与 runtime/static correlation。
-7. `0.5.0-b`：Profile candidate import contract 与 cross-version matrix。
-8. `0.5.x`：session/dynamic 模块拆分、coverage/CI hardening。
-9. `1.0.0-rc`：release discipline、兼容性冻结、第二版本 repeatable gate 复核。
+以下名称是执行批次，不额外制造重复版本号。批次按顺序推进；每个批次独立 PR、独立 acceptance，并冻结与本批无关的公共 schema 和架构改动。
 
-每个子阶段都必须独立 PR、独立 acceptance，不能把 runtime gate、公共 schema 重构和大规模模块拆分塞进同一个 PR。那样出了问题，真就不是排查，是考古了。
+### 10.1 `0.4.1-runtime`：v19977 agent workflow repeat gate
+
+- 输入：当前 v0.4.0 working tree、reviewed v19977 Profile/acceptance record、可前台触发生命周期的真实小程序 target，以及显式 `WXMP_TOOLSET=expert` 的 live runner。
+- 交付：执行 `doctor -> open -> foreground/reload recovery -> snapshot -> observe -> inventory -> same-transport replay -> close`；归档 sanitized summary、session evidence refs、module/Profile hash、continuation 与清理结果。
+- 验收：新 workflow 至少完成 1 次独立全序列成功；首次 `open` 不重复等待，`resumeTool/resumeArguments` 可直接续跑；关闭后 wrapper、proxy 和 Frida session 均清理；acceptance record 只引用脱敏证据。
+- 禁止混入：新 debugger tools、公共 result schema 重构、SessionManager 拆分、SDK v2 migration。
+
+### 10.2 `0.4.1-cross-version`：v20079 full semantic gate
+
+- 输入：`0.4.1-runtime` 已通过的同一 runner、reviewed v20079 hash-bound Profile、可运行 AppService/CDP/Network 的真实 v20079 target。
+- 交付：完成 context/evaluate/breakpoint/trace/hook/body/replay/reconnect/export/detach 全链；更新 cross-version acceptance record，并输出 attach/runtime-connect 采样与失败分类。
+- 验收：3 次独立完整成功序列，其中至少 1 次包含 same-session reconnect；不少于 10 次 attach/runtime-connect 采样；任何缺 target、Profile mismatch、bridge timeout、无 AppService、wrapper 为 0 的情况都 fail closed。
+- 禁止混入：Profile 自动提取器、历史 offset fallback、静态索引 v2、模块级重构。
+
+### 10.3 `0.4.x-debugger`：paused state、scopes、XHR、WebSocket 与 WASM
+
+- 输入：两个版本 runtime gate 的稳定 context/reconnect/evidence 语义，以及现有 CDP Debugger/Network 原语。
+- 交付：按 R1.3 顺序实现 paused state、scope variables、call-frame evaluation、XHR/exception breakpoint、request initiator、WebSocket messages 和 bounded WASM save；logical/CDP breakpoint 生命周期显式分层。
+- 验收：每个工具都有 unit/contract/stdio integration test 与 API 文档；变量、消息和 bytecode 全部支持分页/截断；reconnect 后失效 ID 不被伪装成可用。
+- 禁止混入：redaction/export schema v2、Profile candidate promotion、SessionManager 大拆分。
+
+### 10.4 `0.5.0-evidence-static`：证据、索引、关联与 Profile candidate
+
+- 输入：稳定的 runtime tool/result contract、真实 runtime evidence fixtures、main/subpackage/plugin/minigame 静态 fixtures，以及 extractor-neutral Profile candidate 样本。
+- 交付：依次以独立 PR 完成 evidence redaction/export v2、static index/manifest v2、runtime/static correlation、Profile candidate import/validate/promotion 和 cross-version matrix；MCP core 只消费 candidate，不内置 IDA/PE extractor。
+- 验收：sanitized export 不泄漏 fixture secrets；每条静态结论带 source/confidence；runtime endpoint 可追到候选源码或给出不可关联原因；未 review、缺 hash/offset/scene evidence 的 candidate 不可 inject。
+- 禁止混入：raw evidence 默认开启、GPL/未声明实现、自动 promotion、SessionManager 重构和 SDK v2 migration。
+
+### 10.5 `0.5.x-hardening`：架构拆分、coverage 与 CI
+
+- 输入：R1/R2 公共 contract 已冻结、live acceptance 可重复、已有 coverage baseline 和可注入 Frida/bridge/CDP seam。
+- 交付：拆分 session lifecycle/context/capability/finding 与 dynamic registries；增加 property/fuzz/soak tests；补 Ubuntu Node.js 22 cold-start/static/contract、format/lint、coverage、audit、license 和 version gates。
+- 验收：`sessions/manager` 关键状态机 line coverage 至少 `70%`，`dynamic` 至少 `75%`；Windows Node.js 20/22 与 Ubuntu Node.js 22 在 fresh checkout + `npm ci` 下可复现；lazy Frida/stdio 边界不变。
+- 禁止混入：新的产品能力、tool rename、Profile 语义变更、以 mock coverage 代替 real-target acceptance。
+
+### 10.6 `1.0.0-rc`：发布与兼容性冻结
+
+- 输入：前述批次全部通过、两个 reviewed WMPF 版本具有 repeatable acceptance、tool/manifest schema 候选冻结。
+- 交付：`CHANGELOG.md`、tag、GitHub Release、release checklist、兼容性矩阵、冻结的 tool snapshot/acceptance manifest，以及三类 issue templates。
+- 验收：从 tag 可执行 `npm ci && npm run check`；package/server/docs/tag 版本一致；release 可定位对应 acceptance；仓库敏感数据与二进制审计为零发现。
+- 禁止混入：未经独立 spike 验证的 SDK v2、macOS runtime 宣称、最后一刻公共 schema 或 tool surface 变更。
+
+一旦某批次验收失败，只在该批次内修复和补证，不借机夹带下一阶段功能。要不然看着进度挺猛，回归一炸，谁都说不清是哪层协议语义变了。
 
 ## 11. 完成判定
 

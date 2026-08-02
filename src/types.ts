@@ -33,6 +33,22 @@ export interface WmpfContext {
   probedAt?: string;
   connectedAt: string;
   capabilities: string[];
+  provenance?: string[];
+  runtimeGeneration?: number;
+  active?: boolean;
+}
+
+export interface CdpExecutionContext {
+  id: string;
+  wmpfContextId?: string;
+  uniqueId?: string;
+  name: string;
+  origin: string;
+  kind: WmpfContext['kind'];
+  role: WmpfContext['role'];
+  auxData?: Record<string, unknown>;
+  createdAt: string;
+  provenance: 'cdp.Runtime.executionContextCreated';
 }
 
 export interface RuntimeCapabilities {
@@ -112,6 +128,9 @@ export interface NetworkRecord {
   postData?: string;
   resourceType?: string;
   timestamp?: number;
+  transport: 'wx.request' | 'fetch' | 'xhr' | 'cdp';
+  transportOptions?: Record<string, unknown>;
+  hookCursor?: number;
   response?: {
     status: number;
     statusText?: string;

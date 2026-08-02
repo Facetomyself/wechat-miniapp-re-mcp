@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "review": {
+    "date": "2026-07-28",
+    "repository": "D:\\reverse_ENV\\mcp\\wechat-miniapp-re-mcp",
+    "branch": "fix/project-review-p0",
+    "commit": "6de6b79",
+    "scope": [
+      "MCP contract",
+      "agent experience",
+      "WMPF protocol observability",
+      "context and domain model",
+      "dynamic and static tool semantics"
+    ]
+  },
+  "findings": [
+    {
+      "id": "AX-001",
+      "priority": "P0",
+      "severity": "critical",
+      "status": "confirmed",
+      "title": "Missing agent-first bootstrap entrypoint",
+      "claim": "The server exposes 53 flat tools but no server instructions, prompts, resources, or deterministic bootstrap tool, so callers must manually orchestrate target, attach, runtime, context, capture, export, and cleanup state.",
+      "evidence": [
+        { "path": "src/server.ts", "lines": "14-19" },
+        { "path": "src/tools/helpers.ts", "lines": "13-15,59-60" },
+        { "path": "README.md", "lines": "249-272" },
+        { "path": "scripts/live-semantic-gate.mjs", "lines": "335-435" },
+        { "measurement": "tools=53, toolsListBytes=21769, requiredFields=73, outputSchema=0, annotations=0, title=0" }
+      ],
+      "impact": "High tool-selection cost, repeated manual state management, brittle recovery, and poor first-use experience.",
+      "recommendation": "Add wxmp_doctor, wxmp_open, and wxmp_close; publish server instructions/prompts/resources; default to an agent toolset of 12-18 tools.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-002",
+      "priority": "P0",
+      "severity": "critical",
+      "status": "confirmed",
+      "title": "Unknown WMPF envelopes lose their payload",
+      "claim": "The bridge records only seq and compressAlgo for an envelope before decoding three known categories; unknown category payload bytes, after, originalSize, length, and hash are discarded.",
+      "evidence": [
+        { "path": "src/transport/bridge-server.ts", "lines": "76-90" },
+        { "path": "src/transport/codec.ts", "lines": "6-24" },
+        { "runtimeArtifact": "D:\\reverse_ENV\\workspace\\live-verification\\wechat-miniapp\\live-semantic-gate-v031-1784111644618.json", "observation": "wmpf.setupContext=3, wmpf.customMessage=51" },
+        { "external": "evi0s/WMPFDebugger@7763acb", "observation": "55 generated WARemoteDebug message constructors and 19 category constants" }
+      ],
+      "impact": "The project cannot build a versioned protocol corpus or learn from new runtime categories.",
+      "recommendation": "Persist bounded unknown-envelope metadata and payload artifacts with version, size, SHA-256, decoder state, and category histogram.",
+      "confidence": "high",
+      "redaction": { "redacted": true, "redaction_method": "runtime payload values omitted; counts and paths only", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-003",
+      "priority": "P0",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "WMPF and CDP context identities are flattened",
+      "claim": "WMPF logical jscontextId and CDP Runtime.executionContextId are represented in a flat context map without explicit identity edges.",
+      "evidence": [
+        { "path": "src/transport/cdp-channel.ts", "lines": "19-21,133-165" },
+        { "path": "src/sessions/manager.ts", "lines": "15-34,401-480" },
+        { "runtimeArtifact": "D:\\reverse_ENV\\workspace\\live-verification\\wechat-miniapp\\live-semantic-gate-v031-1784111644618.json", "observation": "contexts 1,3,4,5,6 all classified as appservice with the same route and href" }
+      ],
+      "impact": "Context selection is ambiguous and downstream scripts, requests, pages, and AppID cannot be reliably attributed.",
+      "recommendation": "Introduce a provenance-bearing context graph from process to WMPF context to CDP execution context to app/page role.",
+      "confidence": "high",
+      "redaction": { "redacted": true, "redaction_method": "AppID omitted", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-004",
+      "priority": "P0",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "Script breakpoint result ignores actualLocation",
+      "claim": "wxmp_set_breakpoint normalizes only result.locations, although Debugger.setBreakpoint returns actualLocation.",
+      "evidence": [
+        { "path": "src/tools/dynamic.ts", "lines": "148-156" },
+        { "path": "scripts/live-semantic-gate.mjs", "lines": "479-496", "observation": "live gate separately parses actualLocation to decide success" }
+      ],
+      "impact": "A bound breakpoint can be reported as boundLocations=0, misleading the Agent and acceptance consumers.",
+      "recommendation": "Normalize locations and actualLocation into one boundLocations list and test both CDP breakpoint methods.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-005",
+      "priority": "P0",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "API inventory destructively drains hook records",
+      "claim": "wxmp_get_api_inventory(include_hooks=true) and wxmp_get_hooked_requests both call the same drain() function.",
+      "evidence": [
+        { "path": "src/tools/dynamic.ts", "lines": "231-245,310-349" },
+        { "path": "src/runtime/wx-request-hook.ts", "lines": "230-236" }
+      ],
+      "impact": "A read-only summary call can remove evidence required by the next detail call.",
+      "recommendation": "Use an append-only bounded ring buffer with cursor-based peek; make release explicit or defer it to stop.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-006",
+      "priority": "P1",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "Replay changes request transport semantics",
+      "claim": "wxmp_replay_request always evaluates a fetch-based replay expression regardless of the original request source.",
+      "evidence": [
+        { "path": "src/tools/dynamic.ts", "lines": "370-388" },
+        { "path": "src/runtime/expressions.ts", "observation": "buildReplayExpression uses fetch" }
+      ],
+      "impact": "wx.request-specific options and runtime behavior are lost, so replay is not transport-faithful.",
+      "recommendation": "Record transport and transport-specific options; replay through the same transport by default and report semanticDowngrade when impossible.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-007",
+      "priority": "P1",
+      "severity": "medium",
+      "status": "confirmed",
+      "title": "Capability scope is inconsistent across contexts",
+      "claim": "Trace and request-hook activation are tracked per context while Network is a single session boolean.",
+      "evidence": [
+        { "path": "src/sessions/manager.ts", "lines": "299-315" },
+        { "path": "src/tools/dynamic.ts", "lines": "259-270" }
+      ],
+      "impact": "Enabling or disabling Network in one context can misrepresent capture state in another context.",
+      "recommendation": "Track domain activation per context and derive the session-level capability as an aggregate.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-008",
+      "priority": "P1",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "WeChat domain snapshot is absent",
+      "claim": "The runtime probe returns mostly capability booleans and publicStatus omits target AppID; launch options, page stack, page data, storage, components, package topology, and cloud inventory are not first-class results.",
+      "evidence": [
+        { "path": "src/runtime/wx-runtime.ts", "lines": "75-94" },
+        { "path": "src/types.ts", "lines": "8-15" },
+        { "path": "src/sessions/manager.ts", "lines": "318-340" }
+      ],
+      "impact": "The Agent must write ad-hoc Runtime.evaluate expressions before it can understand the current mini-program.",
+      "recommendation": "Add a provenance-bearing app/page/runtime snapshot returned by wxmp_open and wxmp_app_snapshot.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-009",
+      "priority": "P1",
+      "severity": "medium",
+      "status": "confirmed",
+      "title": "Static index does not parse mini-program structure",
+      "claim": "Static index v1 extracts URLs, wx APIs, and navigation routes with regex but does not parse app.json, subpackages, plugins, components, permissions, or source relationships.",
+      "evidence": [
+        { "path": "src/static/adapter.ts", "lines": "152-182" }
+      ],
+      "impact": "Static output cannot drive package selection or runtime-to-source correlation.",
+      "recommendation": "Build a versioned manifest-first index with source locations and an optional AST adapter.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-010",
+      "priority": "P1",
+      "severity": "medium",
+      "status": "confirmed",
+      "title": "Default toolset contains duplicate and maintenance tools",
+      "claim": "wxmp_list_targets duplicates wxmp_detect_wmpf; wxmp_session_status duplicates wxmp_get_runtime_info; raw/Profile/proxy maintenance tools are exposed by default.",
+      "evidence": [
+        { "path": "src/tools/session.ts", "lines": "18-20,42-64" },
+        { "path": "src/tools/profile.ts", "lines": "11-82" },
+        { "path": "README.md", "lines": "356-366" }
+      ],
+      "impact": "Tool choice becomes noisier and MCP context is spent on expert-only schemas.",
+      "recommendation": "Deduplicate and expose agent/expert toolsets, defaulting to the agent surface.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-011",
+      "priority": "P1",
+      "severity": "medium",
+      "status": "confirmed",
+      "title": "Result and error contracts lack MCP-native recovery metadata",
+      "claim": "Success and errors are returned only as text JSON, with no outputSchema, structuredContent, retryable, nextActions, needsUserAction, or missingCapability fields.",
+      "evidence": [
+        { "path": "src/tools/helpers.ts", "lines": "13-15,59-60" },
+        { "path": "src/errors.ts", "lines": "1-25" },
+        { "measurement": "outputSchema=0, annotations=0, title=0" }
+      ],
+      "impact": "Clients cannot validate outputs or reliably continue after lifecycle failures.",
+      "recommendation": "Define versioned success/error schemas and publish structuredContent plus recovery semantics.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "AX-012",
+      "priority": "P2",
+      "severity": "medium",
+      "status": "runtime-pending",
+      "title": "Cross-context script and request identifier collisions are not bounded",
+      "claim": "Scripts and requests are keyed only by scriptId/requestId although one bridge multiplexes multiple WMPF contexts; uniqueness across those contexts has not been demonstrated.",
+      "evidence": [
+        { "path": "src/transport/cdp-channel.ts", "lines": "19-21,91-120" }
+      ],
+      "impact": "If identifiers are only context-local, later events can overwrite earlier records and misattribute source or traffic.",
+      "recommendation": "Run a dual-context collision experiment and, unless global uniqueness is proven, key records by contextId plus protocol ID.",
+      "confidence": "medium",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    }
+  ]
+}

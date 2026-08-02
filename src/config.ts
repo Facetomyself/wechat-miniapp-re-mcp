@@ -3,7 +3,10 @@ import path from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+export type Toolset = 'agent' | 'expert';
+
 export interface AppConfig {
+  toolset: Toolset;
   workspaceRoot: string;
   profileDirs: string[];
   legacyProfileDirs: string[];
@@ -14,6 +17,8 @@ export interface AppConfig {
   eventLimit: number;
   maxEvidenceEvents: number;
   maxEvidenceBytes: number;
+  protocolPreviewBytes: number;
+  maxProtocolArtifactBytes: number;
 }
 
 function splitPaths(value: string | undefined): string[] {
@@ -73,9 +78,12 @@ export function loadConfig(): AppConfig {
   const configuredEventLimit = Number(process.env.WXMP_EVENT_LIMIT ?? 5000);
   const configuredMaxEvidenceEvents = Number(process.env.WXMP_MAX_EVIDENCE_EVENTS ?? 100_000);
   const configuredMaxEvidenceBytes = Number(process.env.WXMP_MAX_EVIDENCE_BYTES ?? 256 * 1024 * 1024);
+  const configuredProtocolPreviewBytes = Number(process.env.WXMP_PROTOCOL_PREVIEW_BYTES ?? 2048);
+  const configuredMaxProtocolArtifactBytes = Number(process.env.WXMP_MAX_PROTOCOL_ARTIFACT_BYTES ?? 8 * 1024 * 1024);
   const explicitProfiles = splitPaths(process.env.WXMP_PROFILE_DIR);
   const explicitSignatureDbs = splitPaths(process.env.WXMP_SIGNATURE_DB);
   return {
+    toolset: process.env.WXMP_TOOLSET === 'expert' ? 'expert' : 'agent',
     workspaceRoot: path.resolve(process.env.WXMP_WORKSPACE_ROOT ?? defaultWorkspaceRoot()),
     profileDirs: [...explicitProfiles, ...defaultProfileDirs()].filter((candidate, index, all) => all.indexOf(candidate) === index),
     legacyProfileDirs: splitPaths(process.env.WXMP_LEGACY_PROFILE_DIR),
@@ -90,6 +98,12 @@ export function loadConfig(): AppConfig {
     maxEvidenceBytes: Number.isSafeInteger(configuredMaxEvidenceBytes) && configuredMaxEvidenceBytes >= 1024 * 1024
       ? configuredMaxEvidenceBytes
       : 256 * 1024 * 1024,
+    protocolPreviewBytes: Number.isSafeInteger(configuredProtocolPreviewBytes) && configuredProtocolPreviewBytes >= 64
+      ? Math.min(configuredProtocolPreviewBytes, 64 * 1024)
+      : 2048,
+    maxProtocolArtifactBytes: Number.isSafeInteger(configuredMaxProtocolArtifactBytes) && configuredMaxProtocolArtifactBytes >= 64 * 1024
+      ? Math.min(configuredMaxProtocolArtifactBytes, 64 * 1024 * 1024)
+      : 8 * 1024 * 1024,
   };
 }
 

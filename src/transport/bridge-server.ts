@@ -1,11 +1,26 @@
 import { WebSocket, WebSocketServer } from 'ws';
+import { createHash } from 'node:crypto';
 import { decodeCdpPayload, decodeContext, decodeEnvelope, encodeCdpEnvelope } from './codec.js';
 import { WxmpError } from '../errors.js';
+import { isKnownProtocolCategory } from './protocol-registry.js';
+
+export interface BridgeEnvelopeObservation {
+  seq?: number;
+  after?: number;
+  category: string;
+  compressAlgo?: number;
+  originalSize?: number;
+  decodedSize: number;
+  sha256: string;
+  payload: Buffer;
+  decoder: 'known' | 'unknown' | 'failed';
+  error?: string;
+}
 
 export interface BridgeHooks {
   onCdp(sessionId: string, payload: string, contextId: string): void;
   onContext(sessionId: string, action: 'add' | 'remove', context: { id: string; name?: string }): void;
-  onEnvelope(sessionId: string, category: string, data: Record<string, unknown>): void;
+  onEnvelope(sessionId: string, observation: BridgeEnvelopeObservation): void;
   onConnected(sessionId: string): void;
   onDisconnected(sessionId: string): void;
 }
@@ -74,20 +89,38 @@ export class WmpfBridgeServer {
     this.connectionWaiters.delete(sessionId);
 
     socket.on('message', (data) => {
+      const frame = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
       try {
-        const envelope = decodeEnvelope(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
-        this.hooks.onEnvelope(sessionId, envelope.category, { seq: envelope.seq, compressAlgo: envelope.compressAlgo });
-        if (envelope.category === 'chromeDevtoolsResult') {
-          const cdp = decodeCdpPayload(envelope.data);
-          this.hooks.onCdp(sessionId, cdp.payload, cdp.jscontextId);
-        } else if (envelope.category === 'addJsContext' || envelope.category === 'removeJsContext') {
-          const context = decodeContext(envelope.category, envelope.data);
-          if (context) this.hooks.onContext(sessionId, envelope.category === 'addJsContext' ? 'add' : 'remove', context);
+        const envelope = decodeEnvelope(frame);
+        let decoder: BridgeEnvelopeObservation['decoder'] = isKnownProtocolCategory(envelope.category) ? 'known' : 'unknown';
+        let decodeError: string | undefined;
+        try {
+          if (envelope.category === 'chromeDevtoolsResult' || envelope.category === 'chromeDevtools') {
+            const cdp = decodeCdpPayload(envelope.data);
+            this.hooks.onCdp(sessionId, cdp.payload, cdp.jscontextId);
+          } else if (envelope.category === 'addJsContext' || envelope.category === 'removeJsContext') {
+            const context = decodeContext(envelope.category, envelope.data);
+            if (context) this.hooks.onContext(sessionId, envelope.category === 'addJsContext' ? 'add' : 'remove', context);
+          }
+        } catch (error) {
+          decoder = 'failed';
+          decodeError = error instanceof Error ? error.message : String(error);
         }
+        this.hooks.onEnvelope(sessionId, observeEnvelope(envelope.data, {
+          seq: envelope.seq,
+          after: envelope.after,
+          category: envelope.category,
+          compressAlgo: envelope.compressAlgo,
+          originalSize: envelope.originalSize,
+          decoder,
+          error: decodeError,
+        }));
       } catch (error) {
-        this.hooks.onEnvelope(sessionId, 'decodeError', {
-          message: error instanceof Error ? error.message : String(error),
-        });
+        this.hooks.onEnvelope(sessionId, observeEnvelope(frame, {
+          category: 'decodeError',
+          decoder: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        }));
       }
     });
     socket.on('close', () => {
@@ -100,7 +133,11 @@ export class WmpfBridgeServer {
       }
     });
     socket.on('error', (error) => {
-      this.hooks.onEnvelope(sessionId, 'socketError', { message: error.message });
+      this.hooks.onEnvelope(sessionId, observeEnvelope(Buffer.alloc(0), {
+        category: 'socketError',
+        decoder: 'failed',
+        error: error.message,
+      }));
     });
   }
 
@@ -167,4 +204,16 @@ export class WmpfBridgeServer {
       pendingSessions: [...this.pendingSessions],
     };
   }
+}
+
+function observeEnvelope(
+  payload: Buffer,
+  metadata: Omit<BridgeEnvelopeObservation, 'payload' | 'decodedSize' | 'sha256'>,
+): BridgeEnvelopeObservation {
+  return {
+    ...metadata,
+    payload,
+    decodedSize: payload.length,
+    sha256: createHash('sha256').update(payload).digest('hex'),
+  };
 }

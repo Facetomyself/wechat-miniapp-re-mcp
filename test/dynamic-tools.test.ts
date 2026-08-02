@@ -191,3 +191,27 @@ test('large replay bodies are replaced in both value and raw CDP response', asyn
   assert.ok(text.length < 20_000);
   assert.deepEqual(sentContexts, ['ctx-origin']);
 });
+
+test('breakpoint normalization accepts Debugger.setBreakpoint actualLocation', async () => {
+  const session = {
+    channel: {
+      scripts: new Map([['script-1', { scriptId: 'script-1', contextId: 'ctx-origin', url: 'app.js' }]]),
+      send: async () => ({
+        id: 1,
+        result: { breakpointId: 'bp-1', actualLocation: { scriptId: 'script-1', lineNumber: 3, columnNumber: 0 } },
+      }),
+    },
+    evidence: { append: async () => {} },
+  };
+  const app = {
+    sessions: { get: () => session, contextId: () => 'ctx-origin' },
+  } as unknown as WxmpApp;
+  const response = await tool(app, 'wxmp_set_breakpoint').handler({
+    session_id: 'session-1',
+    script_id: 'script-1',
+    line_number: 3,
+  });
+  const payload = JSON.parse((response.content[0] as { type: 'text'; text: string }).text) as { data: { boundLocations: number; pending: boolean } };
+  assert.equal(payload.data.boundLocations, 1);
+  assert.equal(payload.data.pending, false);
+});

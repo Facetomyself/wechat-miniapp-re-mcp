@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTraceScript } from '../src/runtime/trace-script.js';
-import { buildReplayExpression, buildWxApiExpression, buildCloudFunctionExpression } from '../src/runtime/expressions.js';
+import { buildReplayExpression, buildReplayPlan, buildWxApiExpression, buildCloudFunctionExpression } from '../src/runtime/expressions.js';
 
 test('trace script wraps wx API categories selectively', () => {
   const all = buildTraceScript(['all']);
@@ -71,4 +71,25 @@ test('all runtime expressions are syntactically valid', () => {
   for (const expression of expressions) {
     assert.doesNotThrow(() => new Function(`return ${expression};`), `Invalid expression: ${expression.slice(0, 60)}`);
   }
+});
+
+test('replay plans preserve known transports and disclose CDP downgrade', () => {
+  const wxPlan = buildReplayPlan({
+    url: 'https://api.test', method: 'POST', headers: {}, body: '{}', transport: 'wx.request',
+  });
+  assert.equal(wxPlan.usedTransport, 'wx.request');
+  assert.equal(wxPlan.semanticDowngrade, null);
+  assert.ok(wxPlan.expression.includes('runtime.wx.request'));
+
+  const xhrPlan = buildReplayPlan({ url: 'https://api.test', method: 'GET', headers: {}, transport: 'xhr' });
+  assert.equal(xhrPlan.usedTransport, 'xhr');
+  assert.doesNotThrow(() => new Function(`return ${xhrPlan.expression};`));
+
+  const cdpPlan = buildReplayPlan({ url: 'https://api.test', method: 'GET', headers: {}, transport: 'cdp' });
+  assert.equal(cdpPlan.usedTransport, 'fetch');
+  assert.deepEqual(cdpPlan.semanticDowngrade, {
+    from: 'cdp',
+    to: 'fetch',
+    reason: 'CDP Network observes requests but does not expose the initiating application transport.',
+  });
 });

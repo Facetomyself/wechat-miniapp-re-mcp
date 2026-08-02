@@ -12,7 +12,14 @@ test('WxmpError serializes code, message, and details', () => {
       message: 'Something went wrong',
       details: { pid: 1234, file: 'test.ts' },
     },
+    retryable: false,
+    needsUserAction: false,
+    nextActions: ['wxmp_doctor'],
   });
+  const profilePayload = errorPayload(new WxmpError('PROFILE_NOT_FOUND', 'No reviewed Profile is available'));
+  assert.equal(profilePayload.needsUserAction, true);
+  assert.equal(profilePayload.missingCapability, 'runtimeProfile');
+  assert.match(String(profilePayload.userAction), /hash-bound Profile/);
 });
 
 test('errorPayload wraps generic Error as INTERNAL_ERROR', () => {
