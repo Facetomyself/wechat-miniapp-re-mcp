@@ -41,10 +41,22 @@ test('request hook installs and restores wx.request, fetch, and XMLHttpRequest',
   xhr.open();
   xhr.setRequestHeader();
   xhr.send();
-  const records = vm.runInContext('globalThis.__wxmpRequestHook.drain()', sandbox) as Array<{ type: string; response: { status: number } }>;
+  const firstCapture = vm.runInContext('globalThis.__wxmpRequestHook.peek(0, 10)', sandbox) as {
+    records: Array<{ type: string; response: { status: number }; cursor: number; requestId: string; transport: string }>;
+    nextCursor: number;
+    dropped: number;
+  };
+  const records = firstCapture.records;
   assert.equal(records.length, 1);
   assert.equal(records[0].type, 'XMLHttpRequest');
   assert.equal(records[0].response.status, 201);
+  assert.equal(records[0].requestId, 'hook-1');
+  assert.equal(records[0].transport, 'xhr');
+  const repeated = vm.runInContext('globalThis.__wxmpRequestHook.peek(0, 10)', sandbox) as { records: unknown[] };
+  assert.equal(repeated.records.length, 1);
+  const afterCursor = vm.runInContext(`globalThis.__wxmpRequestHook.peek(${firstCapture.nextCursor}, 10)`, sandbox) as { records: unknown[] };
+  assert.equal(afterCursor.records.length, 0);
+  assert.equal(firstCapture.dropped, 0);
 
   const restored = vm.runInContext('globalThis.__wxmpRequestHook.stop()', sandbox) as { installed: string[] };
   assert.deepEqual(Array.from(restored.installed), ['wx.request', 'fetch', 'XMLHttpRequest']);

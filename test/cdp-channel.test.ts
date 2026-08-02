@@ -54,22 +54,22 @@ test('CDP channel indexes scriptParsed and network events', async () => {
     params: { scriptId: '10', url: 'https://example.test/app.js', executionContextId: 1 },
   }), 'ctx-1');
   assert.equal(channel.scripts.size, 1);
-  assert.equal(channel.scripts.get('10')?.url, 'https://example.test/app.js');
-  assert.equal(channel.scripts.get('10')?.contextId, 'ctx-1');
+  assert.equal(channel.findScript('10')?.url, 'https://example.test/app.js');
+  assert.equal(channel.findScript('10')?.contextId, 'ctx-1');
 
   channel.handlePayload(JSON.stringify({
     method: 'Network.requestWillBeSent',
     params: { requestId: 'r1', request: { url: 'https://api.test/data', method: 'POST', headers: { 'x-trace': '1' } } },
   }), 'ctx-1');
   assert.equal(channel.requests.size, 1);
-  assert.equal(channel.requests.get('r1')?.method, 'POST');
-  assert.equal(channel.requests.get('r1')?.contextId, 'ctx-1');
+  assert.equal(channel.findRequest('r1')?.method, 'POST');
+  assert.equal(channel.findRequest('r1')?.contextId, 'ctx-1');
 
   channel.handlePayload(JSON.stringify({
     method: 'Network.responseReceived',
     params: { requestId: 'r1', response: { status: 200, mimeType: 'application/json', headers: {} } },
   }), 'ctx-1');
-  assert.equal(channel.requests.get('r1')?.response?.status, 200);
+  assert.equal(channel.findRequest('r1')?.response?.status, 200);
 
   await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
@@ -90,8 +90,8 @@ test('CDP channel normalizes empty WMPF event context ids as unscoped', async ()
     params: { requestId: 'unscoped-request', request: { url: 'https://fixture.test', method: 'GET', headers: {} } },
   }), '');
 
-  assert.equal(channel.scripts.get('unscoped-script')?.contextId, undefined);
-  assert.equal(channel.requests.get('unscoped-request')?.contextId, undefined);
+  assert.equal(channel.findScript('unscoped-script')?.contextId, undefined);
+  assert.equal(channel.findRequest('unscoped-request')?.contextId, undefined);
 
   await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
@@ -176,7 +176,7 @@ test('CDP disconnect resets runtime state but preserves context listeners for re
   }), 'ctx-1');
 
   channel.disconnect('fixture disconnect');
-  assert.equal(channel.contexts.size, 0);
+  assert.equal(channel.executionContexts.size, 0);
   assert.equal(channel.scripts.size, 0);
   assert.equal(channel.requests.size, 0);
   assert.deepEqual(actions, ['add:1', 'remove:1']);
@@ -229,13 +229,13 @@ test('CDP channel tracks execution context creation and destruction', async () =
   assert.equal(added[0].id, '1');
   assert.equal(added[0].name, 'AppContext');
   assert.equal(added[0].kind, 'miniapp');
-  assert.equal(channel.contexts.size, 1);
+  assert.equal(channel.executionContexts.size, 1);
 
   channel.handlePayload(JSON.stringify({
     method: 'Runtime.executionContextDestroyed',
     params: { executionContextId: 1 },
   }), 'ctx-1');
-  assert.equal(channel.contexts.size, 0);
+  assert.equal(channel.executionContexts.size, 0);
 
   await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
@@ -278,6 +278,38 @@ test('CDP channel rejects duplicate or malformed caller-supplied ids', async () 
   );
   channel.disconnect('fixture done');
   await pendingRejection;
+  await evidence.flush();
+  await fs.rm(root, { recursive: true, force: true });
+});
+
+test('CDP indexes use WMPF context plus local id and reject ambiguous lookups', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-cdp-'));
+  const evidence = new EvidenceStore(root, 'fixture', 'session-1');
+  await evidence.init();
+  const channel = new CdpChannel('session-1', evidence, async () => {});
+  for (const contextId of ['ctx-a', 'ctx-b']) {
+    channel.handlePayload(JSON.stringify({
+      method: 'Debugger.scriptParsed',
+      params: { scriptId: 'shared', url: `wxmp://${contextId}.js` },
+    }), contextId);
+    channel.handlePayload(JSON.stringify({
+      method: 'Network.requestWillBeSent',
+      params: { requestId: 'shared', request: { url: `https://${contextId}.test`, method: 'GET', headers: {} } },
+    }), contextId);
+    channel.handlePayload(JSON.stringify({
+      method: 'Runtime.executionContextCreated',
+      params: { context: { id: 1, name: 'AppService', origin: 'https://servicewechat.com' } },
+    }), contextId);
+  }
+  assert.equal(channel.scripts.size, 2);
+  assert.equal(channel.requests.size, 2);
+  assert.equal(channel.executionContexts.size, 2);
+  assert.equal(channel.findScript('shared', 'ctx-b')?.url, 'wxmp://ctx-b.js');
+  assert.equal(channel.findRequest('shared', 'ctx-a')?.url, 'https://ctx-a.test');
+  assert.equal(channel.findScript('shared', 'ctx-missing'), null);
+  assert.equal(channel.findRequest('shared', 'ctx-missing'), null);
+  assert.throws(() => channel.findScript('shared'), /multiple WMPF contexts/);
+  assert.throws(() => channel.findRequest('shared'), /multiple WMPF contexts/);
   await evidence.flush();
   await fs.rm(root, { recursive: true, force: true });
 });

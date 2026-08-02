@@ -18,6 +18,9 @@ test('loadConfig resolves workspace root and debug port', () => {
   assert.ok(config.signatureDbPaths.some((candidate) => candidate.endsWith(path.join('data', 'profiles', 'aob-signatures.json'))));
   assert.ok(config.maxEvidenceEvents >= 1000);
   assert.ok(config.maxEvidenceBytes >= 1024 * 1024);
+  assert.equal(config.toolset, 'agent');
+  assert.ok(config.protocolPreviewBytes >= 64);
+  assert.ok(config.maxProtocolArtifactBytes >= 64 * 1024);
 });
 
 test('loadConfig respects WXMP_DEBUG_PORT env', () => {
@@ -74,4 +77,13 @@ test('loadConfig falls back from invalid event limits', () => {
   process.env.WXMP_EVENT_LIMIT = 'not-a-number';
   assert.equal(loadConfig().eventLimit, 5000);
   if (prev !== undefined) process.env.WXMP_EVENT_LIMIT = prev; else delete process.env.WXMP_EVENT_LIMIT;
+});
+
+test('loadConfig exposes the expert toolset only when explicitly requested', () => {
+  const previous = process.env.WXMP_TOOLSET;
+  process.env.WXMP_TOOLSET = 'expert';
+  assert.equal(loadConfig().toolset, 'expert');
+  process.env.WXMP_TOOLSET = 'unexpected';
+  assert.equal(loadConfig().toolset, 'agent');
+  if (previous !== undefined) process.env.WXMP_TOOLSET = previous; else delete process.env.WXMP_TOOLSET;
 });

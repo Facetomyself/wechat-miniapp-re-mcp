@@ -1,17 +1,39 @@
 # Progress and Acceptance Status
 
-Last updated: 2026-07-18
+Last updated: 2026-07-29
 
 Current working state:
 
-- Child branch: `main`
-- Package version: `0.3.1`
+- Child branch: `fix/project-review-p0` (uncommitted v0.4.0 implementation; local static/unit/contract gates complete, real WMPF workflow runtime-pending)
+- Package version: `0.4.0`
 - Repository visibility: `public` after a working-tree, reachable-history, pull-request, and Actions-log sensitive-data audit.
 - v0.3.0 remediation is delivered through PR #6; v0.3.1 closes the repeatable WMPF v19977 semantic gate through PR #7; WMPF v20079 profile/AOB/hash-binding closure is delivered through PR #11; public delivery status is recorded by PR #12. Parent gitlink/public-status synchronization is merged through `reverse_ENV` PR #6.
-- The original delivery phases are complete except for the full second-version mini-program semantic gate.
+- The v0.4.0 agent-first implementation is static/unit/contract verified locally; its new real-target workflow remains runtime-pending.
 - Future product work and acceptance priorities are tracked in [`roadmap.md`](roadmap.md); this file records achieved capability gates only.
 
 The project is not marked complete by a percentage. Transport connectivity, tool invocation, semantic capability success, and repeatability are tracked as separate gates.
+
+## v0.4.0 agent-first MCP optimization
+
+- Default `WXMP_TOOLSET=agent` exposes 16 high-frequency tools; `WXMP_TOOLSET=expert` preserves all 59 tools. `wxmp_open` owns target/Profile/attach/runtime/context/hook/snapshot/package-correlation orchestration, and `wxmp_close` restores wrappers, detaches, and exports evidence.
+- MCP initialization now publishes usage instructions. Three prompts and status/context-graph/evidence resources are available through native MCP capabilities.
+- Every tool has a title, output schema and four behavior annotations. Success and error responses expose `structuredContent` while preserving text JSON compatibility; recovery fields include retry/user-action/capability/next-actions.
+- Unknown or failed WMPF envelopes retain `seq`, `after`, sizes, SHA-256, bounded preview and bounded workspace binary artifacts. Known and unknown decoder states are explicit.
+- WMPF logical contexts and CDP execution contexts are separate graph nodes. script/request indexes use `WMPF context + local ID`; ambiguous unscoped lookups fail instead of guessing.
+- Request-hook reads use non-destructive cursor-based `peek`; API inventory no longer drains captures. Hook records persist transport metadata, and replay preserves `wx.request`/fetch/XHR where known or reports CDP-to-fetch `semanticDowngrade`.
+- `wxmp_app_snapshot` captures bounded identity/account/base-library/launch/enter/page/storage/config state. `wxmp_observe_window` combines Hook, CDP, cursor and snapshot evidence.
+- Breakpoint normalization accepts both `locations[]` and `actualLocation`; target status exposes AppID/process metadata; Network capability is tracked by WMPF context route.
+- Local verification currently passes 107 tests, strict typecheck, 16/59 exact tool contracts, acceptance records, and dual-toolset stdio smoke. The MCP SDK is pinned by the lockfile to `1.30.0`; patched transitive dependencies close the current production audit at `0 vulnerabilities`. The live runner explicitly selects the expert toolset while the product default remains agent-first. A new live WMPF semantic run has not yet been performed, so these v0.4.0 runtime claims remain `runtime-pending` beyond fixture coverage.
+
+### 2026-07-29 local validation closure
+
+- `scripts/live-semantic-gate.mjs` now explicitly starts the server with `WXMP_TOOLSET=expert`, because the acceptance sequence intentionally uses low-level runtime primitives outside the default 16-tool agent surface. The product default remains `agent`.
+- A newly attached `wxmp_open` call no longer performs a second runtime wait in the same invocation. If the WMPF lifecycle still needs a foreground/reload transition, it retains the session and returns `resumeTool: "wxmp_open"` plus `resumeArguments.session_id` for machine-readable continuation.
+- An explicitly supplied `context_id` is now a strict lookup. A missing or incorrect ID fails in that context instead of silently falling back to another WMPF context; only an omitted context may use the selected-context path.
+- Recovery metadata now distinguishes retryable runtime transitions from required user action. Missing reviewed Profiles return a concrete hash-bound Profile action, and tool annotations were corrected against actual read/write and idempotency behavior.
+- Node.js `20.20.2` and `22.23.1` both pass all `107/107` tests. Contract verification reports exactly `16` agent tools and `59` expert/API tools; agent and expert stdio smoke, two acceptance records, the expert live-gate dry run, and child/parent diff checks pass.
+- The dependency baseline is MCP SDK `1.30.0`, Hono Node adapter `2.0.12`, `fast-uri 3.1.4`, and `brace-expansion 5.0.8`; the production audit reports `0 vulnerabilities`.
+- This closure is local static/unit/contract evidence only. It does not replace the historical v0.3.1 v19977 live evidence and does not claim that the new v0.4.0 workflow has passed a real WMPF target.
 
 ## v0.3.2 acceptance contract foundation
 
@@ -27,7 +49,7 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 - Windows default package discovery now includes current `radium/users/<user>/applet/packages` trees while retaining the legacy `radium/Applet/packages` root; the default stdio `wxmp_scan_packages` call finds cached packages on the reviewed xwechat installation.
 - A connected bridge now proves transport only. `capabilities.cdp` becomes true only after `Runtime.enable` succeeds, while Debugger and Network probes retain independent partial-capability results across reconnect activation.
 - Frida script creation/loading failures unload any owned script and detach the process session. Unexpected Frida detach also stops the DevTools proxy, with a structured finding and evidence event if proxy cleanup fails.
-- Node.js 20 and 22 both pass `99` tests, `53`-tool contract/acceptance/smoke gates; Node.js 22 line coverage is `76.79%` overall, `34.64%` for `sessions/manager.js`, `62.69%` for `frida-adapter.js`, and `54.11%` for `dynamic.js`.
+- The delivered v0.3.1 baseline passed Node.js 20 and 22 with `99` tests and 53 tools; its recorded Node.js 22 coverage was `76.79%` overall, `34.64%` for `sessions/manager.js`, `62.69%` for `frida-adapter.js`, and `54.11%` for `dynamic.js`.
 
 ## v0.3.0 review remediation
 
@@ -78,8 +100,8 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 | Phase | Status | Verified evidence | Remaining gate |
 |---|---|---|---|
 | 0. Repository and governance | Complete | Child repository, submodule boundary, MIT license, ignore rules, clean-room/legacy separation | — |
-| 1. Lightweight MCP core | Implementation complete | stdio cold start, schema validation, structured errors, codec/bridge tests, reconnect ownership, evidence persistence | Official MCP conformance remains optional follow-up |
-| 2. Dynamic reverse workflow | v19977 acceptance complete | AppService selection, evaluate, bound breakpoint, trace/hook events, inventory, Network body, replay, reconnect, detach, evidence export; v20079 hook attach/detach passed | Repeat the full mini-program semantic gate on v20079 or another second WMPF version |
+| 1. Lightweight MCP core | v0.4.0 local gate complete | stdio cold start, 16/59 toolsets, instructions/prompts/resources, schemas/annotations/structured output, codec/bridge/protocol-recorder tests | Official MCP conformance remains optional follow-up |
+| 2. Dynamic reverse workflow | v0.3.1 live accepted; v0.4.0 runtime-pending | v19977 AppService/evaluate/breakpoint/trace/hook/inventory/body/replay/reconnect/export; v0.4.0 workflow/context graph/cursor/snapshot fixture coverage | Repeat the v0.4.0 agent-first sequence on a live target, then repeat full semantics on v20079 |
 | 3. Static reverse workflow | Acceptance complete | prior main/plugin/subpackage/minigame evidence plus reproducible backend subprocess decompile/search/index/repack and failure/no-output gates | — |
 | 4. Profile lifecycle | Complete | canonical v19977/v20079 reviewed profiles, per-module SHA-256 binding, unique cross-version AOB matches, candidate review gate, v20079 production attach/detach | — |
 | 5. Parent integration | Complete | `reverse_ENV` PR #6 advances the gitlink to child `7504046` and records Public/cross-version/workspace governance status | — |
@@ -88,9 +110,9 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 ## Automated verification
 
 - TypeScript strict typecheck and build.
-- Node test suite: 99 passing tests covering acceptance records, live-runner dry-run/path guards, bridge, codec, CDP state and activation probes, nested WMPF `wx` resolution, context/request indexing, originating/unscoped-context source and replay behavior, request hooks, proxy client ID/context isolation and detach cleanup, Frida script-init cleanup, current xwechat package discovery, evidence count/byte overflow and write recovery, profile gates, cross-version AOB/profile fixtures, static guards and real backend subprocess behavior, server schema validation, and target discovery.
-- MCP contract checks required tools, prefix, duplicates, and minimum inventory.
-- stdio smoke verifies initialize, list-tools, and `wxmp_health` without WeChat.
+- Node test suite: 107 passing tests, adding unknown-envelope retention, compound-index ambiguity, breakpoint normalization, non-destructive Hook cursors, transport-aware replay, app snapshot, binary evidence, continuation recovery and MCP capability coverage to the existing acceptance/runtime/static/Profile suite.
+- MCP contract checks exact 16-agent/59-expert inventories, required tools, prefix, duplicates, metadata/output schemas, API inventory, README markers and version agreement.
+- stdio smoke starts both toolsets without WeChat and verifies initialize, list-tools metadata, `wxmp_health` structured output, prompts and resources.
 - Production dependency audit reports no known vulnerabilities at the time of this update.
 
 ## Real-target evidence status
@@ -107,12 +129,13 @@ Verified on WMPF v19977 by the v0.3.1 live semantic gate:
 - same-session disconnect/requeue/reconnect;
 - evidence bundle export and detach.
 
-The remaining real-target gap is a full second-version mini-program semantic gate. Cross-version AOB uniqueness, profile hash binding, production hook attachment, and detach are closed on WMPF v20079.
+The remaining real-target gaps are the v0.4.0 agent-first workflow repeat gate on v19977 and a full second-version mini-program semantic gate. Cross-version AOB uniqueness, profile hash binding, production hook attachment, and detach are closed on WMPF v20079.
 
 ## Known limitations and next actions
 
-1. Run the v19977 AppService/CDP/Network/trace/request-hook/replay/reconnect semantic sequence on WMPF v20079 or another reviewed second version.
-2. Keep the mini-program selector available before attach; the WMPF debug filter remains lifecycle-triggered.
+1. Run `doctor -> open -> foreground/reload recovery -> snapshot -> observe -> inventory -> same-transport replay -> close` on the reviewed v19977 target and archive a new acceptance summary.
+2. Repeat the full AppService/CDP/Network/trace/request-hook/replay/reconnect sequence on WMPF v20079 or another reviewed second version.
+3. Keep the mini-program selector available before attach; the WMPF debug filter remains lifecycle-triggered.
 
 ## Update rule
 

@@ -43,6 +43,7 @@ const reconnectTimeoutMs = integerOption(options.reconnectTimeoutMs, 'reconnect-
 const nodePath = path.resolve(options.nodePath ?? process.execPath);
 const serverPath = path.resolve(options.serverPath ?? path.join(repositoryRoot, 'build', 'src', 'index.js'));
 const profilePath = options.profilePath ? path.resolve(options.profilePath) : undefined;
+const requiredToolset = 'expert';
 const gateId = `v${serverVersion.replace(/[^0-9A-Za-z.-]/g, '-')}-wmpf${expectedWmpfVersion ?? 'auto'}-${Date.now()}`;
 const requiredGates = gateContract.liveRunnerRequired.filter((gateName) => !options.skipReconnect || gateName !== 'reconnect');
 const outputRoot = path.resolve(workspaceRoot, projectName, 'wechat-miniapp');
@@ -60,6 +61,7 @@ if (options.dryRun) {
     ok: true,
     dryRun: true,
     serverVersion,
+    toolset: requiredToolset,
     expectedWmpfVersion: expectedWmpfVersion ?? null,
     expectedPid: expectedPid ?? null,
     projectName,
@@ -78,6 +80,7 @@ const summary = {
   gateId,
   startedAt: new Date().toISOString(),
   serverVersion,
+  toolset: requiredToolset,
   expectedWmpfVersion: expectedWmpfVersion ?? null,
   expectedPid: expectedPid ?? null,
   requiredGates,
@@ -260,6 +263,7 @@ transport = new StdioClientTransport({
   cwd: repositoryRoot,
   env: {
     ...process.env,
+    WXMP_TOOLSET: requiredToolset,
     REVERSE_ENV_ROOT: reverseRoot,
     WXMP_WORKSPACE_ROOT: workspaceRoot,
     WXMP_GWXAPKG: process.env.WXMP_GWXAPKG ?? path.join(reverseRoot, 'tools', 'Gwxapkg-runtime', 'gwxapkg.exe'),

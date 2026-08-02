@@ -93,3 +93,98 @@ export function buildWxRuntimeProbeExpression(): string {
     };
   })()`;
 }
+
+export function buildWxAppSnapshotExpression(options: {
+  includePageData?: boolean;
+  dataDepth?: number;
+  maxDataBytes?: number;
+} = {}): string {
+  const includePageData = options.includePageData !== false;
+  const dataDepth = Math.max(0, Math.min(5, Math.trunc(options.dataDepth ?? 2)));
+  const maxDataBytes = Math.max(1024, Math.min(512 * 1024, Math.trunc(options.maxDataBytes ?? 64 * 1024)));
+  return `(() => {
+    ${WX_RUNTIME_RESOLVER_SOURCE}
+    const runtime = __wxmpResolveRuntime();
+    const errors = [];
+    function attempt(name, fn, fallback) {
+      try { return fn(); } catch (error) { errors.push({ name, message: String(error && error.message || error) }); return fallback; }
+    }
+    function bounded(value, depth, budget) {
+      const seen = [];
+      function visit(input, level) {
+        if (input === null || input === undefined || typeof input === 'boolean' || typeof input === 'number') return input;
+        if (typeof input === 'string') return input.length > 2000 ? input.slice(0, 2000) + '...(truncated)' : input;
+        if (typeof input === 'function') return '[Function]';
+        if (level > depth) return '[DepthLimit]';
+        if (typeof input !== 'object') return String(input);
+        if (seen.indexOf(input) >= 0) return '[Circular]';
+        seen.push(input);
+        if (Array.isArray(input)) return input.slice(0, 100).map(function (item) { return visit(item, level + 1); });
+        const output = {};
+        const keys = Object.keys(input).slice(0, 200);
+        for (let i = 0; i < keys.length; i++) {
+          const key = keys[i];
+          try { output[key] = visit(input[key], level + 1); } catch (_) { output[key] = '[Unavailable]'; }
+        }
+        return output;
+      }
+      const result = visit(value, 0);
+      let encoded = '';
+      try { encoded = JSON.stringify(result); } catch (_) { return { value: '[Unserializable]', truncated: true, bytes: 0 }; }
+      if (encoded.length <= budget) return { value: result, truncated: false, bytes: encoded.length };
+      return { value: encoded.slice(0, budget), truncated: true, bytes: encoded.length, encoding: 'json-preview' };
+    }
+    const wxObject = runtime.wx;
+    const config = runtime.config || {};
+    const accountInfo = attempt('wx.getAccountInfoSync', function () { return wxObject && wxObject.getAccountInfoSync ? wxObject.getAccountInfoSync() : null; }, null);
+    const systemInfo = attempt('wx.getSystemInfoSync', function () { return wxObject && wxObject.getSystemInfoSync ? wxObject.getSystemInfoSync() : null; }, null);
+    const launchOptions = attempt('wx.getLaunchOptionsSync', function () { return wxObject && wxObject.getLaunchOptionsSync ? wxObject.getLaunchOptionsSync() : null; }, null);
+    const enterOptions = attempt('wx.getEnterOptionsSync', function () { return wxObject && wxObject.getEnterOptionsSync ? wxObject.getEnterOptionsSync() : null; }, null);
+    const storageInfo = attempt('wx.getStorageInfoSync', function () { return wxObject && wxObject.getStorageInfoSync ? wxObject.getStorageInfoSync() : null; }, null);
+    const pages = attempt('getCurrentPages', function () { return runtime.hasGetCurrentPages ? runtime.wxRoot.getCurrentPages() : []; }, []);
+    const pageStack = Array.isArray(pages) ? pages.slice(-30).map(function (page) {
+      const route = String(page && (page.route || page.__route__) || '');
+      const output = { route, options: bounded(page && page.options || {}, 2, 8192) };
+      if (${JSON.stringify(includePageData)}) output.data = bounded(page && page.data, ${dataDepth}, ${maxDataBytes});
+      return output;
+    }) : [];
+    const app = attempt('getApp', function () { return typeof runtime.wxRoot.getApp === 'function' ? runtime.wxRoot.getApp() : null; }, null);
+    const configAppId = config.appId || config.appid || config.accountInfo && config.accountInfo.appId || '';
+    const accountMiniProgram = accountInfo && accountInfo.miniProgram || {};
+    return {
+      capturedAt: new Date().toISOString(),
+      runtimePath: runtime.path,
+      identity: {
+        appId: accountMiniProgram.appId || configAppId || '',
+        envVersion: accountMiniProgram.envVersion || config.envVersion || '',
+        version: accountMiniProgram.version || config.version || '',
+        provenance: accountMiniProgram.appId ? 'wx.getAccountInfoSync' : configAppId ? '__wxConfig' : 'unavailable'
+      },
+      library: {
+        sdkVersion: systemInfo && systemInfo.SDKVersion || runtime.library && (runtime.library.version || runtime.library.SDKVersion) || '',
+        platform: systemInfo && systemInfo.platform || '',
+        system: systemInfo && systemInfo.system || '',
+        contextType: runtime.library && runtime.library.contextType || '',
+        envType: runtime.library && runtime.library.envType || ''
+      },
+      launchOptions: bounded(launchOptions, 3, 16384),
+      enterOptions: bounded(enterOptions, 3, 16384),
+      pageStack,
+      currentRoute: pageStack.length ? pageStack[pageStack.length - 1].route : '',
+      storage: storageInfo ? {
+        keys: Array.isArray(storageInfo.keys) ? storageInfo.keys.slice(0, 500) : [],
+        currentSize: storageInfo.currentSize,
+        limitSize: storageInfo.limitSize
+      } : null,
+      app: app ? { globalData: bounded(app.globalData, ${dataDepth}, ${maxDataBytes}) } : null,
+      config: bounded(config, 2, ${maxDataBytes}),
+      capabilities: {
+        hasWx: Boolean(wxObject),
+        hasRequest: typeof wxObject?.request === 'function',
+        hasCloud: Boolean(wxObject?.cloud),
+        hasGetCurrentPages: runtime.hasGetCurrentPages
+      },
+      errors
+    };
+  })()`;
+}

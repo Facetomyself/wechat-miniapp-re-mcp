@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { buildCloudFunctionExpression, buildWxApiExpression } from '../src/runtime/expressions.js';
 import { buildTraceScript } from '../src/runtime/trace-script.js';
-import { buildWxRuntimeProbeExpression } from '../src/runtime/wx-runtime.js';
+import { buildWxAppSnapshotExpression, buildWxRuntimeProbeExpression } from '../src/runtime/wx-runtime.js';
 
 function nestedRuntime() {
   const wxFrame = {
@@ -54,4 +54,28 @@ test('trace wraps wx methods exposed by the nested runtime', () => {
   assert.equal(installed.wxRuntimePath, 'globalThis.nav.wxFrame');
   const stopped = vm.runInContext('globalThis.__wxmpTrace.stop()', sandbox) as { restored: boolean };
   assert.equal(stopped.restored, true);
+});
+
+test('app snapshot captures identity, page stack, storage keys, and bounded page data', () => {
+  const sandbox = {
+    __wxConfig: { appId: 'wx-config-fallback', pages: ['pages/index/index'] },
+    __wxLibrary: { version: '3.9.0', contextType: 'AppService', envType: 'miniprogram' },
+    wx: {
+      request() {},
+      getAccountInfoSync: () => ({ miniProgram: { appId: 'wx-snapshot', envVersion: 'develop', version: '1.2.3' } }),
+      getSystemInfoSync: () => ({ SDKVersion: '3.9.1', platform: 'windows', system: 'Windows 11' }),
+      getLaunchOptionsSync: () => ({ path: 'pages/index/index', scene: 1001 }),
+      getEnterOptionsSync: () => ({ path: 'pages/detail/index', query: { id: '42' } }),
+      getStorageInfoSync: () => ({ keys: ['token-key', 'settings'], currentSize: 2, limitSize: 10240 }),
+    },
+    getCurrentPages: () => [{ route: 'pages/index/index', options: { from: 'test' }, data: { nested: { answer: 42 } } }],
+    getApp: () => ({ globalData: { feature: true } }),
+  };
+  vm.createContext(sandbox);
+  const snapshot = vm.runInContext(buildWxAppSnapshotExpression({ dataDepth: 2, maxDataBytes: 8192 }), sandbox) as Record<string, unknown>;
+  assert.equal((snapshot.identity as Record<string, unknown>).appId, 'wx-snapshot');
+  assert.equal(snapshot.currentRoute, 'pages/index/index');
+  assert.deepEqual(Array.from((snapshot.storage as Record<string, unknown>).keys as string[]), ['token-key', 'settings']);
+  assert.equal((snapshot.pageStack as unknown[]).length, 1);
+  assert.equal((snapshot.capabilities as Record<string, unknown>).hasRequest, true);
 });

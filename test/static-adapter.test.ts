@@ -11,6 +11,7 @@ const BACKEND_FIXTURE = path.resolve('test', 'fixtures', 'gwxapkg-backend.mjs');
 
 function mockConfig(workspaceRoot: string, gwxapkgPath: string | null = null): AppConfig {
   return {
+    toolset: 'agent',
     workspaceRoot,
     profileDirs: [],
     legacyProfileDirs: [],
@@ -21,6 +22,8 @@ function mockConfig(workspaceRoot: string, gwxapkgPath: string | null = null): A
     eventLimit: 5000,
     maxEvidenceEvents: 100_000,
     maxEvidenceBytes: 256 * 1024 * 1024,
+    protocolPreviewBytes: 2048,
+    maxProtocolArtifactBytes: 8 * 1024 * 1024,
   };
 }
 

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 import { WebSocket } from 'ws';
 import { WmpfBridgeServer } from '../src/transport/bridge-server.js';
-import { decodeCdpPayload, decodeEnvelope, encodeCdpResultEnvelope } from '../src/transport/codec.js';
+import { decodeCdpPayload, decodeEnvelope, encodeCdpResultEnvelope, encodeDebugEnvelope } from '../src/transport/codec.js';
+import type { BridgeEnvelopeObservation } from '../src/transport/bridge-server.js';
 
 test('bridge assigns a pending session and routes CDP in both directions', async () => {
   const port = await freePort();
@@ -97,6 +98,33 @@ test('bridge rejects a second concurrent runtime reservation', async () => {
     (error: unknown) => error instanceof Error && error.message.includes('already reserved'),
   );
   bridge.release('session-1');
+  await bridge.stop();
+});
+
+test('bridge preserves unknown WMPF envelopes with hashable payload metadata', async () => {
+  const port = await freePort();
+  const observations: BridgeEnvelopeObservation[] = [];
+  const bridge = new WmpfBridgeServer('127.0.0.1', port, {
+    onCdp: () => undefined,
+    onContext: () => undefined,
+    onEnvelope: (_sessionId, observation) => observations.push(observation),
+    onConnected: () => undefined,
+    onDisconnected: () => undefined,
+  });
+  await bridge.start();
+  bridge.prepare('session-unknown');
+  const socket = await connect(port);
+  const payload = Buffer.from('unknown-protocol-fixture');
+  socket.send(encodeDebugEnvelope('customMessage', payload, { seq: 51, after: 3, originalSize: payload.length }));
+  await waitUntil(() => observations.length === 1);
+  assert.equal(observations[0].category, 'customMessage');
+  assert.equal(observations[0].decoder, 'unknown');
+  assert.equal(observations[0].seq, 51);
+  assert.equal(observations[0].after, 3);
+  assert.equal(observations[0].decodedSize, payload.length);
+  assert.equal(observations[0].sha256.length, 64);
+  assert.deepEqual(observations[0].payload, payload);
+  socket.close();
   await bridge.stop();
 });
 

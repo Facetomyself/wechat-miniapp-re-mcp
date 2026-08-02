@@ -5,14 +5,14 @@ import { ToolEntry } from './types.js';
 
 export function buildSessionTools(app: WxmpApp): ToolEntry[] {
   return [
-    entry('wxmp_health', 'Report cold-start health and lazy runtime capabilities.', objectSchema({}), async () => ({
-      content: [{ type: 'text', text: JSON.stringify({ ok: true, data: {
+    entry('wxmp_health', 'Report cold-start health and lazy runtime capabilities.', objectSchema({}), async () => result({
         name: 'wechat-miniapp-re-mcp', version: VERSION, platform: process.platform,
+        toolset: app.config.toolset,
         workspaceRoot: app.config.workspaceRoot, bridge: app.sessions.bridge.info(), staticAdapter: app.staticAdapter.info(),
         profileDirs: app.config.profileDirs, signatureDbPaths: app.config.signatureDbPaths,
         evidence: { queryLimit: app.config.eventLimit, maxEvents: app.config.maxEvidenceEvents, maxBytes: app.config.maxEvidenceBytes },
+        protocolRecorder: { previewBytes: app.config.protocolPreviewBytes, maxArtifactBytes: app.config.maxProtocolArtifactBytes },
         startupRequiresTarget: false,
-      } }, null, 2) }],
     })),
 
     entry('wxmp_list_targets', 'Discover PC WeChat WMPF processes and runtime metadata.', objectSchema({}), async () => result(await app.sessions.listTargets())),

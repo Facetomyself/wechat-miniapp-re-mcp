@@ -1,10 +1,19 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { WxmpApp } from './app.js';
 import { errorPayload, WxmpError } from './errors.js';
 import { buildTools } from './tools/registry.js';
 import { VERSION } from './version.js';
+import { getPrompt, listPrompts, listResources, listResourceTemplates, readResource, SERVER_INSTRUCTIONS } from './mcp/catalog.js';
 
 export function createServer(app: WxmpApp): Server {
   const entries = buildTools(app);
@@ -13,13 +22,21 @@ export function createServer(app: WxmpApp): Server {
   const validators = new Map(entries.map((entry) => [entry.tool.name, schemaValidator.getValidator(entry.tool.inputSchema)]));
   const server = new Server(
     { name: 'wechat-miniapp-re-mcp', version: VERSION },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, prompts: {}, resources: {} }, instructions: SERVER_INSTRUCTIONS },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: entries.map((entry) => entry.tool) }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: listPrompts() }));
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => getPrompt(request.params.name, request.params.arguments ?? {}));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: listResources(app) }));
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: listResourceTemplates() }));
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => readResource(app, request.params.uri));
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const entry = handlers.get(request.params.name);
-    if (!entry) return { content: [{ type: 'text', text: JSON.stringify(errorPayload(new Error(`Unknown tool: ${request.params.name}`)), null, 2) }], isError: true };
+    if (!entry) {
+      const payload = errorPayload(new WxmpError('TOOL_NOT_FOUND', `Unknown tool: ${request.params.name}`, { name: request.params.name }));
+      return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }], structuredContent: payload, isError: true };
+    }
     try {
       const args = request.params.arguments ?? {};
       const validation = validators.get(request.params.name)!(args);
@@ -31,7 +48,8 @@ export function createServer(app: WxmpApp): Server {
       return await entry.handler(validation.data as Record<string, unknown>);
     } catch (error) {
       if (!(error instanceof WxmpError)) console.error(`[wxmp] tool ${request.params.name} failed:`, error);
-      return { content: [{ type: 'text', text: JSON.stringify(errorPayload(error), null, 2) }], isError: true };
+      const payload = errorPayload(error);
+      return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }], structuredContent: payload, isError: true };
     }
   });
   server.onclose = async () => app.shutdown();

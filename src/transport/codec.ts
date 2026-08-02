@@ -91,6 +91,21 @@ export function encodeCdpResultEnvelope(seq: number, payload: string, jscontextI
   return encodeCdpMessage('chromeDevtoolsResult', seq, payload, jscontextId);
 }
 
+export function encodeDebugEnvelope(
+  category: string,
+  data: Buffer,
+  options: { seq?: number; after?: number; compressAlgo?: number; originalSize?: number } = {},
+): Buffer {
+  return Buffer.from(DebugMessage.encode(DebugMessage.create({
+    seq: options.seq ?? 1,
+    after: options.after ?? 0,
+    category,
+    data,
+    compressAlgo: options.compressAlgo ?? 0,
+    originalSize: options.originalSize ?? data.length,
+  })).finish());
+}
+
 function encodeCdpMessage(category: 'chromeDevtools' | 'chromeDevtoolsResult', seq: number, payload: string, jscontextId: string): Buffer {
   const inner = Buffer.from(
     ChromeDevtools.encode(

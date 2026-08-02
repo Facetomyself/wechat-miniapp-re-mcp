@@ -10,18 +10,20 @@ const gateContract = JSON.parse(readFileSync(path.join(repositoryRoot, 'data', '
   liveRunnerRequired: string[];
 };
 
-test('live semantic gate dry-run resolves a versioned execution plan', () => {
+test('live semantic gate dry-run resolves an expert versioned execution plan', () => {
   const result = run(['--dry-run', '--wmpf-version', '20079', '--skip-reconnect']);
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout) as {
     ok: boolean;
     dryRun: boolean;
+    toolset: string;
     expectedWmpfVersion: number;
     requiredGates: string[];
     outputPath: string;
   };
   assert.equal(output.ok, true);
   assert.equal(output.dryRun, true);
+  assert.equal(output.toolset, 'expert');
   assert.equal(output.expectedWmpfVersion, 20079);
   assert.deepEqual(output.requiredGates, gateContract.liveRunnerRequired.filter((gateName) => gateName !== 'reconnect'));
   assert.match(output.outputPath, /live-semantic-gate-v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-wmpf20079-/);
