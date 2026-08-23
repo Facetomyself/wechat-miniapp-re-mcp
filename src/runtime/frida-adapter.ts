@@ -2,8 +2,14 @@ import { OffsetProfile, TargetProcess } from '../types.js';
 import { WxmpError } from '../errors.js';
 import { buildHookSource } from './hook-source.js';
 
+export interface HookRpcObservation {
+  [key: string]: unknown;
+}
+
 export interface FridaHandle {
   detach(): Promise<void>;
+  status(): Promise<HookRpcObservation>;
+  forceDebugTrigger(): Promise<HookRpcObservation>;
 }
 
 type FridaModule = Pick<typeof import('frida'), 'getLocalDevice'>;
@@ -62,6 +68,16 @@ export class FridaRuntimeAdapter {
       });
     }
 
+    const callExport = async (name: 'status' | 'forceDebugTrigger'): Promise<HookRpcObservation> => {
+      const exported = script?.exports as { [key: string]: (() => Promise<unknown> | unknown) | undefined } | undefined;
+      const fn = exported?.[name];
+      if (typeof fn !== 'function') {
+        throw new WxmpError('FRIDA_RPC_UNAVAILABLE', `Frida hook RPC ${name} is not exported`, { name });
+      }
+      const value = await fn.call(exported);
+      return value && typeof value === 'object' ? value as HookRpcObservation : { value };
+    };
+
     return {
       detach: async () => {
         if (detached) return;
@@ -69,6 +85,8 @@ export class FridaRuntimeAdapter {
         if (script) await script.unload().catch(() => undefined);
         await session.detach().catch(() => undefined);
       },
+      status: () => callExport('status'),
+      forceDebugTrigger: () => callExport('forceDebugTrigger'),
     };
   }
 }

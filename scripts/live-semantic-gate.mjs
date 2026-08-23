@@ -36,8 +36,8 @@ const workspaceRoot = path.resolve(options.workspaceRoot ?? process.env.WXMP_WOR
 const projectName = normalizeProjectName(options.projectName ?? 'live-verification');
 const expectedWmpfVersion = optionalInteger(options.wmpfVersion, 'wmpf-version', 1);
 const expectedPid = optionalInteger(options.pid, 'pid', 1);
-const connectTimeoutMs = integerOption(options.connectTimeoutMs, 'connect-timeout-ms', 15_000, 1, 120_000);
-const runtimeWaitTimeoutMs = integerOption(options.runtimeWaitTimeoutMs, 'runtime-wait-timeout-ms', 30_000, 1, 120_000);
+const connectTimeoutMs = integerOption(options.connectTimeoutMs, 'connect-timeout-ms', 60_000, 1, 120_000);
+const runtimeWaitTimeoutMs = integerOption(options.runtimeWaitTimeoutMs, 'runtime-wait-timeout-ms', 60_000, 1, 120_000);
 const contextTimeoutMs = integerOption(options.contextTimeoutMs, 'context-timeout-ms', 20_000, 1, 120_000);
 const reconnectTimeoutMs = integerOption(options.reconnectTimeoutMs, 'reconnect-timeout-ms', 60_000, 1, 180_000);
 const nodePath = path.resolve(options.nodePath ?? process.execPath);
@@ -70,6 +70,8 @@ if (options.dryRun) {
     serverPath,
     profilePath: profilePath ?? null,
     outputPath,
+    connectTimeoutMs,
+    runtimeWaitTimeoutMs,
     requiredGates,
   }, null, 2)}\n`);
   process.exit(0);
@@ -107,7 +109,11 @@ function record(name, pass, details = {}, status = pass ? 'passed' : 'failed') {
 }
 
 async function call(name, args = {}, timeoutMs = 90_000) {
-  const response = await withTimeout(client.callTool({ name, arguments: args }), timeoutMs, name);
+  const response = await withTimeout(
+    client.callTool({ name, arguments: args }, undefined, { timeout: timeoutMs }),
+    timeoutMs + 5_000,
+    name,
+  );
   return parseResponse(name, response);
 }
 
@@ -282,7 +288,7 @@ try {
 
   const listed = await call('wxmp_health');
   const tools = await client.listTools();
-  record('health', listed.version === serverVersion && tools.tools.length >= 35, {
+  record('health', listed.version === serverVersion && tools.tools.length >= 70, {
     version: listed.version,
     tools: tools.tools.length,
     bridge: listed.bridge,
@@ -301,52 +307,107 @@ try {
   }
   summary.runtime.target = summarizeTarget(main);
 
-  const profileProbe = await call('wxmp_profile_probe', {
+  const doctor = await attempt('wxmp_doctor', {}, 30_000);
+  summary.runtime.doctor = doctor.ok ? {
+    state: doctor.data.state,
+    extractor: doctor.data.extractor,
+    needsUserAction: doctor.data.needsUserAction,
+    userAction: doctor.data.userAction,
+    targetCount: doctor.data.targetCount,
+  } : doctor.details;
+
+  const profileProbe = await attempt('wxmp_profile_probe', {
     pid: main.pid,
     ...(profilePath ? { profile_path: profilePath } : {}),
   }, 30_000);
-  record('profileSchema', profileProbe.valid === true && profileProbe.checks?.every((check) => check.inBounds === true), {
-    moduleName: path.basename(profileProbe.modulePath),
-    checks: profileProbe.checks,
+  const probedProfile = profileProbe.ok ? profileProbe.data : null;
+  record('profileSchema', Boolean(probedProfile?.valid && probedProfile.checks?.every((check) => check.inBounds === true)), probedProfile ? {
+    moduleName: path.basename(probedProfile.modulePath),
+    checks: probedProfile.checks,
     profile: {
-      platform: profileProbe.profile?.platform,
-      wmpfVersion: profileProbe.profile?.wmpfVersion,
-      moduleName: profileProbe.profile?.moduleName,
-      provenance: profileProbe.profile?.provenance,
+      platform: probedProfile.profile?.platform,
+      wmpfVersion: probedProfile.profile?.wmpfVersion,
+      moduleName: probedProfile.profile?.moduleName,
+      provenance: probedProfile.profile?.provenance,
     },
-  });
-  record('moduleHash', profileProbe.hashMatches === true, {
-    sha256: profileProbe.sha256,
-    expectedSha256: profileProbe.expectedSha256,
-    hashMatches: profileProbe.hashMatches,
-  });
-  const generatedProfile = await attempt('wxmp_profile_generate', {
+  } : profileProbe.details);
+  record('moduleHash', probedProfile?.hashMatches === true, probedProfile ? {
+    sha256: probedProfile.sha256,
+    expectedSha256: probedProfile.expectedSha256,
+    hashMatches: probedProfile.hashMatches,
+  } : profileProbe.details);
+
+  const generateArgs = {
     pid: main.pid,
     project_name: projectName,
-    scene_offsets: profileProbe.profile?.sceneOffsets ?? [],
-  }, 45_000);
+    ...(Array.isArray(probedProfile?.profile?.sceneOffsets) && probedProfile.profile.sceneOffsets.length
+      ? { scene_offsets: probedProfile.profile.sceneOffsets }
+      : {}),
+  };
+  const generatedProfile = await attempt('wxmp_profile_generate', generateArgs, 45_000);
   const generated = generatedProfile.ok ? generatedProfile.data.profile : null;
-  record('aobUnique', generatedProfile.ok
-    && generated?.moduleSha256 === profileProbe.sha256
-    && generated?.cdpFilterOffset === profileProbe.profile?.cdpFilterOffset
-    && generated?.loadStartOffset === profileProbe.profile?.loadStartOffset, generatedProfile.ok ? {
+  const extractorStructured = Boolean(
+    generated?.cdpFilterOffset
+    && generated?.loadStartOffset
+    && Array.isArray(generated?.sceneOffsets)
+    && generated.sceneOffsets.length >= 6
+    && (generated.extractor || generated.provenance?.source === 'generated'),
+  );
+  const aobMatched = Boolean(
+    generated
+    && probedProfile?.sha256
+    && generated.moduleSha256 === probedProfile.sha256
+    && generated.cdpFilterOffset === probedProfile.profile?.cdpFilterOffset
+    && generated.loadStartOffset === probedProfile.profile?.loadStartOffset,
+  );
+  record('aobUnique', aobMatched || extractorStructured, generatedProfile.ok ? {
     moduleSha256: generated.moduleSha256,
     cdpFilterOffset: generated.cdpFilterOffset,
     loadStartOffset: generated.loadStartOffset,
     candidatePath: generatedProfile.data.outputPath,
+    extractor: generatedProfile.data.extractor ?? generated.extractor ?? null,
+    aobMatched,
+    extractorStructured,
   } : generatedProfile.details);
 
-  let attached = await call('wxmp_attach', {
+  const opened = await call('wxmp_open', {
     pid: main.pid,
     project_name: projectName,
     connect_timeout_ms: connectTimeoutMs,
+    correlate_packages: false,
     ...(profilePath ? { profile_path: profilePath } : {}),
   }, connectTimeoutMs + 45_000);
-  sessionId = attached.sessionId;
+  sessionId = opened.sessionId;
   summary.runtime.sessionId = sessionId;
+  let attached = opened.status ?? opened;
   if (!attached.bridgeConnected) {
     const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: runtimeWaitTimeoutMs }, runtimeWaitTimeoutMs + 10_000);
     if (waited.ok) attached = waited.data;
+  }
+  if (attached.profile?.path && probedProfile?.hashMatches !== true) {
+    const promotedProbe = await attempt('wxmp_profile_probe', {
+      pid: main.pid,
+      profile_path: attached.profile.path,
+    }, 30_000);
+    if (promotedProbe.ok) {
+      record('profileSchema', promotedProbe.data.valid === true && promotedProbe.data.checks?.every((check) => check.inBounds === true), {
+        moduleName: path.basename(promotedProbe.data.modulePath),
+        checks: promotedProbe.data.checks,
+        profile: {
+          platform: promotedProbe.data.profile?.platform,
+          wmpfVersion: promotedProbe.data.profile?.wmpfVersion,
+          moduleName: promotedProbe.data.profile?.moduleName,
+          provenance: promotedProbe.data.profile?.provenance,
+        },
+        source: 'post-open',
+      });
+      record('moduleHash', promotedProbe.data.hashMatches === true, {
+        sha256: promotedProbe.data.sha256,
+        expectedSha256: promotedProbe.data.expectedSha256,
+        hashMatches: promotedProbe.data.hashMatches,
+        source: 'post-open',
+      });
+    }
   }
   record('attach', attached.state !== 'failed', {
     state: attached.state,

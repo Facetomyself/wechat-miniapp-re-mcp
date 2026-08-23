@@ -12,6 +12,8 @@ export interface AppConfig {
   legacyProfileDirs: string[];
   signatureDbPaths: string[];
   gwxapkgPath: string | null;
+  offsetExtractorPython?: string | null;
+  offsetExtractorScript?: string | null;
   debugHost: string;
   debugPort: number;
   eventLimit: number;
@@ -37,6 +39,33 @@ function defaultWorkspaceRoot(): string {
     return path.resolve(envRoot, 'workspace');
   }
   return path.resolve(process.cwd(), '.wxmp-workspace');
+}
+
+function firstExisting(paths: Array<string | undefined>): string | null {
+  for (const candidate of paths) {
+    if (candidate && existsSync(path.resolve(candidate))) return path.resolve(candidate);
+  }
+  return null;
+}
+
+function defaultOffsetExtractorPython(): string | null {
+  const explicit = process.env.WXMP_OFFSET_EXTRACTOR_PYTHON;
+  if (explicit) return path.resolve(explicit);
+  return firstExisting([
+    process.env.REVERSE_ENV_ROOT ? path.join(process.env.REVERSE_ENV_ROOT, '.venv', 'Scripts', 'python.exe') : undefined,
+    path.resolve(process.cwd(), '..', '..', '.venv', 'Scripts', 'python.exe'),
+  ]);
+}
+
+function defaultOffsetExtractorScript(): string | null {
+  const explicit = process.env.WXMP_OFFSET_EXTRACTOR;
+  if (explicit) return path.resolve(explicit);
+  return firstExisting([
+    process.env.REVERSE_ENV_ROOT
+      ? path.join(process.env.REVERSE_ENV_ROOT, 'skill', 'wmpf-offset-adaptation', 'scripts', 'extract_wmpf_offsets.py')
+      : undefined,
+    path.resolve(process.cwd(), '..', '..', 'skill', 'wmpf-offset-adaptation', 'scripts', 'extract_wmpf_offsets.py'),
+  ]);
 }
 
 function defaultGwxapkg(): string | null {
@@ -89,6 +118,8 @@ export function loadConfig(): AppConfig {
     legacyProfileDirs: splitPaths(process.env.WXMP_LEGACY_PROFILE_DIR),
     signatureDbPaths: [...explicitSignatureDbs, ...defaultSignatureDbPaths()].filter((candidate, index, all) => all.indexOf(candidate) === index),
     gwxapkgPath: defaultGwxapkg(),
+    offsetExtractorPython: defaultOffsetExtractorPython(),
+    offsetExtractorScript: defaultOffsetExtractorScript(),
     debugHost: process.env.WXMP_DEBUG_HOST ?? '127.0.0.1',
     debugPort: Number.isInteger(debugPort) && debugPort > 0 && debugPort < 65536 ? debugPort : 9421,
     eventLimit: Number.isSafeInteger(configuredEventLimit) && configuredEventLimit >= 100 ? configuredEventLimit : 5000,

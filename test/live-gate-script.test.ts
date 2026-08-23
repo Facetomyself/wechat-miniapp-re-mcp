@@ -20,13 +20,25 @@ test('live semantic gate dry-run resolves an expert versioned execution plan', (
     expectedWmpfVersion: number;
     requiredGates: string[];
     outputPath: string;
+    connectTimeoutMs: number;
+    runtimeWaitTimeoutMs: number;
   };
   assert.equal(output.ok, true);
   assert.equal(output.dryRun, true);
   assert.equal(output.toolset, 'expert');
   assert.equal(output.expectedWmpfVersion, 20079);
+  assert.equal(output.connectTimeoutMs, 60_000);
+  assert.equal(output.runtimeWaitTimeoutMs, 60_000);
   assert.deepEqual(output.requiredGates, gateContract.liveRunnerRequired.filter((gateName) => gateName !== 'reconnect'));
   assert.match(output.outputPath, /live-semantic-gate-v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-wmpf20079-/);
+});
+
+test('live semantic gate dry-run auto-selects the current WMPF when version is omitted', () => {
+  const result = run(['--dry-run']);
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout) as { expectedWmpfVersion: number | null; outputPath: string };
+  assert.equal(output.expectedWmpfVersion, null);
+  assert.match(output.outputPath, /-wmpfauto-/);
 });
 
 test('live semantic gate rejects summary paths outside the controlled project root', () => {

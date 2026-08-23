@@ -21,7 +21,7 @@ export function buildAgentTools(app: WxmpApp): ToolEntry[] {
       pid: args.pid === undefined ? undefined : int(args, 'pid', undefined, 1),
       projectName: optionalText(args, 'project_name'),
       profilePath: optionalText(args, 'profile_path'),
-      connectTimeoutMs: int(args, 'connect_timeout_ms', 5000, 1, 120_000),
+      connectTimeoutMs: args.connect_timeout_ms === undefined ? undefined : int(args, 'connect_timeout_ms', undefined, 1, 120_000),
       correlatePackages: bool(args, 'correlate_packages', true),
     })), {
       annotations: { title: 'Open WeChat Miniapp Session', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -69,6 +69,16 @@ export function buildAgentTools(app: WxmpApp): ToolEntry[] {
       session_id: stringProp('Session identifier.'),
     }, ['session_id']), async (args) => result(await workflow.close(String(args.session_id))), {
       annotations: { title: 'Close and Export Session', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    }),
+    entry('wxmp_correlate', 'Join runtime AppID, scripts, and requests to local wxapkg packages and restored sources; unmatched items keep confidence none with a reason.', objectSchema({
+      session_id: stringProp('Session identifier.'),
+      source_root: stringProp('Optional restored wxapkg source root to index and join.'),
+      app_id: stringProp('Optional AppID override; defaults to the session target AppID.'),
+    }, ['session_id']), async (args) => result(await workflow.correlate(String(args.session_id), {
+      sourceRoot: optionalText(args, 'source_root'),
+      appId: optionalText(args, 'app_id'),
+    })), {
+      annotations: { title: 'Correlate Runtime and Static Evidence', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     }),
   ];
 }

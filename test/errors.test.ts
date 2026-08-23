@@ -20,6 +20,10 @@ test('WxmpError serializes code, message, and details', () => {
   assert.equal(profilePayload.needsUserAction, true);
   assert.equal(profilePayload.missingCapability, 'runtimeProfile');
   assert.match(String(profilePayload.userAction), /hash-bound Profile/);
+  const extractorPayload = errorPayload(new WxmpError('EXTRACTOR_UNAVAILABLE', 'missing extractor'));
+  assert.equal(extractorPayload.needsUserAction, true);
+  assert.equal(extractorPayload.missingCapability, 'runtimeProfile');
+  assert.match(String(extractorPayload.userAction), /WXMP_OFFSET_EXTRACTOR/);
 });
 
 test('errorPayload wraps generic Error as INTERNAL_ERROR', () => {

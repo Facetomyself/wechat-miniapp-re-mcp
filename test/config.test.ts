@@ -87,3 +87,20 @@ test('loadConfig exposes the expert toolset only when explicitly requested', () 
   assert.equal(loadConfig().toolset, 'agent');
   if (previous !== undefined) process.env.WXMP_TOOLSET = previous; else delete process.env.WXMP_TOOLSET;
 });
+
+test('loadConfig honors explicit offset extractor paths', () => {
+  const previousScript = process.env.WXMP_OFFSET_EXTRACTOR;
+  const previousPython = process.env.WXMP_OFFSET_EXTRACTOR_PYTHON;
+  process.env.WXMP_OFFSET_EXTRACTOR = 'C:\\custom\\extract_wmpf_offsets.py';
+  process.env.WXMP_OFFSET_EXTRACTOR_PYTHON = 'C:\\custom\\python.exe';
+  try {
+    const loaded = loadConfig();
+    assert.equal(loaded.offsetExtractorScript, path.resolve('C:\\custom\\extract_wmpf_offsets.py'));
+    assert.equal(loaded.offsetExtractorPython, path.resolve('C:\\custom\\python.exe'));
+  } finally {
+    if (previousScript !== undefined) process.env.WXMP_OFFSET_EXTRACTOR = previousScript;
+    else delete process.env.WXMP_OFFSET_EXTRACTOR;
+    if (previousPython !== undefined) process.env.WXMP_OFFSET_EXTRACTOR_PYTHON = previousPython;
+    else delete process.env.WXMP_OFFSET_EXTRACTOR_PYTHON;
+  }
+});

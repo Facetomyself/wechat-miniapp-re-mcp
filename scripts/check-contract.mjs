@@ -24,10 +24,13 @@ try {
     'wxmp_health', 'wxmp_doctor', 'wxmp_open', 'wxmp_status', 'wxmp_app_snapshot', 'wxmp_observe_window', 'wxmp_close',
     'wxmp_list_targets', 'wxmp_attach', 'wxmp_detach', 'wxmp_session_status', 'wxmp_wait_for_runtime',
     'wxmp_list_contexts', 'wxmp_probe_contexts', 'wxmp_evaluate', 'wxmp_raw_cdp', 'wxmp_list_scripts', 'wxmp_get_source',
-    'wxmp_set_breakpoint', 'wxmp_pause_info', 'wxmp_trace_start', 'wxmp_capture_start',
+    'wxmp_set_breakpoint', 'wxmp_pause_info', 'wxmp_get_paused_state', 'wxmp_get_scope_variables',
+    'wxmp_evaluate_on_call_frame', 'wxmp_list_breakpoints', 'wxmp_break_on_xhr', 'wxmp_set_pause_on_exceptions',
+    'wxmp_get_request_initiator', 'wxmp_list_websockets', 'wxmp_get_websocket_messages', 'wxmp_save_wasm',
+    'wxmp_trace_start', 'wxmp_capture_start',
     'wxmp_hook_wx_request', 'wxmp_get_hooked_requests', 'wxmp_unhook_wx_request', 'wxmp_get_api_inventory',
     'wxmp_replay_request', 'wxmp_call_wx_api', 'wxmp_call_cloud_function', 'wxmp_scan_packages',
-    'wxmp_decompile', 'wxmp_static_search', 'wxmp_profile_generate', 'wxmp_profile_validate', 'wxmp_profile_promote',
+    'wxmp_decompile', 'wxmp_static_search', 'wxmp_correlate', 'wxmp_profile_generate', 'wxmp_profile_validate', 'wxmp_profile_promote',
     'wxmp_export_evidence',
   ];
 
@@ -37,8 +40,8 @@ try {
   if (duplicates.length) failures.push({ code: 'DUPLICATE_TOOLS', tools: duplicates });
   if (missing.length) failures.push({ code: 'MISSING_REQUIRED_TOOLS', tools: missing });
   if (invalid.length) failures.push({ code: 'INVALID_TOOL_PREFIX', tools: invalid });
-  if (tools.length !== 59) failures.push({ code: 'EXPERT_TOOL_COUNT_DRIFT', count: tools.length, expected: 59 });
-  if (agentTools.length !== 16) failures.push({ code: 'AGENT_TOOL_COUNT_DRIFT', count: agentTools.length, expected: 16 });
+  if (tools.length !== 70) failures.push({ code: 'EXPERT_TOOL_COUNT_DRIFT', count: tools.length, expected: 70 });
+  if (agentTools.length !== 18) failures.push({ code: 'AGENT_TOOL_COUNT_DRIFT', count: agentTools.length, expected: 18 });
   const expectedAgentNames = [...AGENT_TOOL_NAMES].sort();
   const actualAgentNames = [...agentNames].sort();
   if (JSON.stringify(expectedAgentNames) !== JSON.stringify(actualAgentNames)) {

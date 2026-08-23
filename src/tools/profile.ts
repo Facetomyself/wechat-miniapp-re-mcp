@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { WxmpApp } from '../app.js';
 import { WxmpError } from '../errors.js';
+import { prepareCandidateProfile } from '../runtime/profile-adapt.js';
 import { SignatureSpec } from '../runtime/profile.js';
 import { resolveInside, safeProjectName } from '../security.js';
 import { entry, int, numberProp, objectSchema, optionalText, result, stringArray, stringProp, text } from './helpers.js';
@@ -18,19 +19,36 @@ export function buildProfileTools(app: WxmpApp): ToolEntry[] {
       return result(await app.sessions.profileManager().probe(target, loaded.profile));
     }),
 
-    entry('wxmp_profile_generate', 'Generate a candidate profile from explicit AOB signatures; never auto-inject candidates.', objectSchema({
+    entry('wxmp_profile_generate', 'Generate a candidate profile from AOB signatures and/or the offset extractor; never auto-inject candidates.', objectSchema({
       pid: numberProp('WMPF PID.'), project_name: stringProp('Workspace project.'),
       signatures: { type: 'array', items: { type: 'object', properties: { name: { enum: ['cdpFilter', 'loadStart'] }, pattern: { type: 'string' }, adjustment: { type: 'number' } }, required: ['name', 'pattern'] } },
       scene_offsets: { type: 'array', items: { type: 'number' } },
-    }, ['pid', 'project_name', 'scene_offsets']), async (args) => {
+    }, ['pid', 'project_name']), async (args) => {
       const target = (await app.sessions.listTargets()).find((item) => item.pid === int(args, 'pid', undefined, 1));
       if (!target) throw new WxmpError('TARGET_NOT_FOUND', 'Target not found');
+      const project = safeProjectName(text(args, 'project_name'));
+      const sceneOffsets = Array.isArray(args.scene_offsets) ? (args.scene_offsets as number[]).map(Number) : [];
+      if (!Array.isArray(args.signatures) && sceneOffsets.length === 0) {
+        const prepared = await prepareCandidateProfile({
+          target,
+          projectName: project,
+          extractor: app.extractor,
+          profiles: app.sessions.profileManager(),
+          workspaceRoot: app.config.workspaceRoot,
+        });
+        return result({
+          profile: prepared.candidate,
+          outputPath: prepared.candidatePath,
+          extractor: prepared.extractorEvidence,
+          aob: prepared.aob,
+          warning: 'candidate profile requires smoke-attested promotion before injection',
+        });
+      }
       const signatures = Array.isArray(args.signatures)
         ? args.signatures as SignatureSpec[]
         : await app.sessions.profileManager().signaturesForVersion(target.version ?? 0);
-      const sceneOffsets = (args.scene_offsets as number[]).map(Number);
+      if (sceneOffsets.length === 0) throw new WxmpError('INVALID_ARGUMENT', 'scene_offsets is required when signatures are supplied without the extractor path');
       const profile = await app.sessions.profileManager().generate(target, signatures, sceneOffsets);
-      const project = safeProjectName(text(args, 'project_name'));
       const dir = resolveInside(app.config.workspaceRoot, project, 'wechat-miniapp', 'profiles');
       await fs.mkdir(dir, { recursive: true });
       const outputPath = resolveInside(dir, `windows-${profile.wmpfVersion}-candidate.json`);

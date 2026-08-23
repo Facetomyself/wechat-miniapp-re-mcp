@@ -3,7 +3,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import path from 'node:path';
 
 const summaries = [];
-for (const [toolset, expected] of [['agent', 16], ['expert', 59]]) {
+for (const [toolset, expected] of [['agent', 18], ['expert', 70]]) {
   const serverPath = path.resolve('build/src/index.js');
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -15,7 +15,7 @@ for (const [toolset, expected] of [['agent', 16], ['expert', 59]]) {
   try {
     await client.connect(transport);
     const listed = await client.listTools();
-    const health = await client.callTool({ name: 'wxmp_health', arguments: {} });
+    const health = await client.callTool({ name: toolset === 'agent' ? 'wxmp_doctor' : 'wxmp_health', arguments: {} });
     const prompts = await client.listPrompts();
     const resources = await client.listResources();
     if (listed.tools.length !== expected

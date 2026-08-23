@@ -3,44 +3,22 @@ import { existsSync } from 'node:fs';
 import { AppConfig } from '../config.js';
 import { EvidenceStore } from '../evidence/store.js';
 import { WxmpError } from '../errors.js';
-import { FridaHandle, FridaRuntimeAdapter } from '../runtime/frida-adapter.js';
+import { FridaRuntimeAdapter } from '../runtime/frida-adapter.js';
 import { ProfileManager } from '../runtime/profile.js';
-import { discoverTargets, resolveTarget } from '../runtime/target-discovery.js';
 import { buildWxRuntimeProbeExpression } from '../runtime/wx-runtime.js';
 import { CdpChannel, extractRemoteValue } from '../transport/cdp-channel.js';
 import { DevToolsProxy } from '../transport/devtools-proxy.js';
 import { BridgeEnvelopeObservation, WmpfBridgeServer } from '../transport/bridge-server.js';
 import { protocolArtifactName } from '../transport/protocol-registry.js';
-import { CdpExecutionContext, EvidenceFinding, OffsetProfile, RuntimeCapabilities, SessionState, TargetProcess, WmpfContext } from '../types.js';
+import { CdpExecutionContext, EvidenceFinding, SessionState, TargetProcess, WmpfContext } from '../types.js';
+import { applyTrackedCapability, refreshContextCapabilities, TrackedCapability } from './capabilities.js';
+import { classifyContextKind, contextScore, inferContextRole, mergeExecutionContext, selectBestContextId } from './contexts.js';
+import { defaultBridgeFactory, defaultClock, defaultSessionRuntimeDeps, SessionRuntimeDeps } from './deps.js';
+import { smokeReady } from '../runtime/profile-adapt.js';
+import { isWaitableState, resolveRuntimeWaitMs, transitionSessionState } from './machine.js';
+import { AttachOptions, WxmpSession } from './session.js';
 
-export interface WxmpSession {
-  id: string;
-  projectName: string;
-  target: TargetProcess;
-  profile: OffsetProfile;
-  profilePath: string;
-  state: SessionState;
-  createdAt: string;
-  updatedAt: string;
-  contexts: Map<string, WmpfContext>;
-  selectedContextId: string;
-  capabilities: RuntimeCapabilities;
-  evidence: EvidenceStore;
-  channel: CdpChannel;
-  frida: FridaHandle | null;
-  findings: EvidenceFinding[];
-  traceContextIds: Set<string>;
-  requestHookContextIds: Set<string>;
-  networkContextIds: Set<string>;
-  runtimeGeneration: number;
-}
-
-export interface AttachOptions {
-  pid?: number;
-  projectName: string;
-  profilePath?: string;
-  connectTimeoutMs?: number;
-}
+export type { AttachOptions, WxmpSession } from './session.js';
 
 const CONTEXT_PROBE_EXPRESSION = buildWxRuntimeProbeExpression();
 
@@ -48,13 +26,21 @@ export class SessionManager {
   private readonly sessions = new Map<string, WxmpSession>();
   private readonly proxies = new Map<string, DevToolsProxy>();
   private readonly profiles: ProfileManager;
-  private readonly frida = new FridaRuntimeAdapter();
+  private readonly frida: FridaRuntimeAdapter;
   private readonly activationPromises = new Map<string, Promise<void>>();
+  private readonly now: NonNullable<SessionRuntimeDeps['now']>;
+  private readonly discoverTargetsImpl: NonNullable<SessionRuntimeDeps['discoverTargets']>;
+  private readonly resolveTargetImpl: NonNullable<SessionRuntimeDeps['resolveTarget']>;
   readonly bridge: WmpfBridgeServer;
 
-  constructor(private readonly config: AppConfig) {
+  constructor(private readonly config: AppConfig, deps: SessionRuntimeDeps = {}) {
+    this.now = deps.now ?? defaultClock;
+    this.discoverTargetsImpl = deps.discoverTargets ?? defaultSessionRuntimeDeps.discoverTargets;
+    this.resolveTargetImpl = deps.resolveTarget ?? defaultSessionRuntimeDeps.resolveTarget;
+    this.frida = deps.frida ?? new FridaRuntimeAdapter();
     this.profiles = new ProfileManager(config.profileDirs, config.legacyProfileDirs, config.signatureDbPaths);
-    this.bridge = new WmpfBridgeServer(config.debugHost, config.debugPort, {
+    const createBridge = deps.createBridge ?? defaultBridgeFactory;
+    this.bridge = createBridge(config.debugHost, config.debugPort, {
       onCdp: (sessionId, payload, contextId) => this.sessions.get(sessionId)?.channel.handlePayload(payload, contextId),
       onContext: (sessionId, action, context) => this.handleContext(sessionId, action, context),
       onEnvelope: (sessionId, observation) => { void this.recordProtocolEnvelope(sessionId, observation); },
@@ -64,11 +50,11 @@ export class SessionManager {
   }
 
   async listTargets(): Promise<TargetProcess[]> {
-    return discoverTargets();
+    return this.discoverTargetsImpl();
   }
 
   async attach(options: AttachOptions): Promise<WxmpSession> {
-    const target = await resolveTarget(options.pid);
+    const target = await this.resolveTargetImpl(options.pid);
     if (!target.version) throw new WxmpError('WMPF_VERSION_UNKNOWN', 'Unable to derive WMPF version from process path', { target });
     const existing = [...this.sessions.values()].find((session) => session.target.pid === target.pid && !['closed', 'failed'].includes(session.state));
     if (existing) throw new WxmpError('TARGET_ALREADY_ATTACHED', `WMPF process ${target.pid} already belongs to session ${existing.id}`);
@@ -84,14 +70,22 @@ export class SessionManager {
     );
     await evidence.init();
     const loaded = await this.profiles.load(target.version, options.profilePath);
-    this.profiles.assertInjectable(loaded.profile);
+    if (options.allowCandidateSmoke) {
+      if (loaded.profile.provenance.confidence !== 'candidate') {
+        throw new WxmpError('PROFILE_SMOKE_NOT_APPLICABLE', 'allowCandidateSmoke requires a generated candidate profile', {
+          provenance: loaded.profile.provenance,
+        });
+      }
+    } else {
+      this.profiles.assertInjectable(loaded.profile);
+    }
     const probe = await this.profiles.probe(target, loaded.profile);
     if (probe.hashMatches === false) throw new WxmpError('PROFILE_HASH_MISMATCH', 'Profile module hash does not match the target module', probe);
     if (!probe.valid) throw new WxmpError('PROFILE_OUT_OF_BOUNDS', 'Profile offsets are outside the target module', probe);
 
     const channel = new CdpChannel(id, evidence, (payload, contextId) => this.bridge.sendCdp(id, payload, contextId));
     channel.onExecutionContext((action, value) => this.handleCdpExecutionContext(id, action, value));
-    const now = new Date().toISOString();
+    const now = this.now().toISOString();
     const session: WxmpSession = {
       id,
       projectName: options.projectName,
@@ -148,7 +142,17 @@ export class SessionManager {
       );
       session.capabilities.frida = true;
       this.updateState(session, 'waiting_for_runtime');
-      const connected = await this.bridge.waitForConnection(id, options.connectTimeoutMs ?? 3000);
+      if (options.allowCandidateSmoke) {
+        const observation = await session.frida.status();
+        await evidence.append('frida.smoke', observation);
+        if (!smokeReady(observation)) {
+          throw new WxmpError('PROFILE_SMOKE_FAILED', 'Frida smoke did not report module/cdp_filter_attached/load_start_attached/ready', {
+            observation,
+          });
+        }
+      }
+      await this.observeForceDebug(session);
+      const connected = await this.bridge.waitForConnection(id, resolveRuntimeWaitMs(options.connectTimeoutMs));
       if (connected && session.state !== 'connected') this.handleConnected(id);
       await this.activationPromises.get(id);
       if (!connected) {
@@ -208,7 +212,7 @@ export class SessionManager {
     const context = session.contexts.get(contextId);
     if (!context) throw new WxmpError('CONTEXT_NOT_FOUND', `Unknown context ${contextId}`, { sessionId, contextId });
     session.selectedContextId = contextId;
-    session.updatedAt = new Date().toISOString();
+    session.updatedAt = this.now().toISOString();
     void session.evidence.append('context.selected', context, { contextId });
     return context;
   }
@@ -244,9 +248,10 @@ export class SessionManager {
 
   async waitForRuntime(sessionId: string, timeoutMs: number): Promise<Record<string, unknown>> {
     const session = this.get(sessionId);
-    if (['closed', 'detaching', 'failed'].includes(session.state)) {
+    if (!isWaitableState(session.state)) {
       throw new WxmpError('SESSION_NOT_WAITABLE', `Session ${sessionId} is in state ${session.state}`, { sessionId, state: session.state });
     }
+    await this.observeForceDebug(session);
     const connected = await this.bridge.waitForConnection(sessionId, timeoutMs);
     if (connected && session.state !== 'connected') this.handleConnected(sessionId);
     await this.activationPromises.get(sessionId);
@@ -299,25 +304,10 @@ export class SessionManager {
     return [...session.contexts.values()];
   }
 
-  setCapability(sessionId: string, capability: 'network' | 'wxTrace' | 'requestHook', enabled: boolean, contextId = ''): void {
+  setCapability(sessionId: string, capability: TrackedCapability, enabled: boolean, contextId = ''): void {
     const session = this.get(sessionId);
-    if (capability === 'wxTrace') {
-      if (enabled && contextId) session.traceContextIds.add(contextId);
-      else if (contextId) session.traceContextIds.delete(contextId);
-      else if (!enabled) session.traceContextIds.clear();
-      session.capabilities.wxTrace = session.traceContextIds.size > 0;
-    } else if (capability === 'requestHook') {
-      if (enabled && contextId) session.requestHookContextIds.add(contextId);
-      else if (contextId) session.requestHookContextIds.delete(contextId);
-      else if (!enabled) session.requestHookContextIds.clear();
-      session.capabilities.requestHook = session.requestHookContextIds.size > 0;
-    } else {
-      if (enabled) session.networkContextIds.add(contextId || '*');
-      else if (contextId) session.networkContextIds.delete(contextId);
-      else session.networkContextIds.clear();
-      session.capabilities.network = session.networkContextIds.size > 0;
-    }
-    this.refreshContextCapabilities(session);
+    applyTrackedCapability(session, capability, enabled, contextId);
+    refreshContextCapabilities(session);
     void session.evidence.append('capability.updated', { capability, enabled, contextId: contextId || null });
   }
 
@@ -477,20 +467,8 @@ export class SessionManager {
     void session.evidence.append('context.execution_added', value, { contextId });
     if (!contextId) return;
     const existing = session.contexts.get(contextId);
-    const context: WmpfContext = {
-      ...existing,
-      id: contextId,
-      name: existing?.name || value.name || '',
-      kind: existing?.kind && existing.kind !== 'unknown' ? existing.kind : value.kind,
-      role: existing?.role && existing.role !== 'unknown' ? existing.role : value.role,
-      origin: value.origin ?? existing?.origin,
-      probeConfidence: existing?.probeConfidence ?? 'unprobed',
-      connectedAt: existing?.connectedAt ?? new Date().toISOString(),
-      capabilities: existing?.capabilities ?? ['evaluate', 'capability-probe'],
-      provenance: [...new Set([...(existing?.provenance ?? []), 'cdp.executionContext.route'])],
-      runtimeGeneration: session.runtimeGeneration,
-      active: true,
-    };
+    const context = mergeExecutionContext(existing, value, session.runtimeGeneration);
+    if (!context.id) return;
     session.contexts.set(contextId, context);
     if (!session.selectedContextId) session.selectedContextId = contextId;
     if (context.kind === 'minigame') session.capabilities.minigameDynamic = 'partial';
@@ -520,8 +498,7 @@ export class SessionManager {
       return;
     }
     const name = value.name ?? '';
-    const lower = name.toLowerCase();
-    const kind = lower.includes('game') ? 'minigame' : lower.includes('app') || lower.includes('service') ? 'miniapp' : 'unknown';
+    const kind = classifyContextKind(name);
     const existing = session.contexts.get(value.id);
     const context: WmpfContext = {
       ...existing,
@@ -530,7 +507,7 @@ export class SessionManager {
       kind: kind === 'unknown' ? existing?.kind ?? 'unknown' : kind,
       role: existing?.role && existing.role !== 'unknown' ? existing.role : kind === 'minigame' ? 'minigame' : 'unknown',
       probeConfidence: existing?.probeConfidence ?? 'unprobed',
-      connectedAt: existing?.connectedAt ?? new Date().toISOString(),
+      connectedAt: existing?.connectedAt ?? this.now().toISOString(),
       capabilities: existing?.capabilities ?? ['evaluate', 'capability-probe'],
       provenance: [...new Set([...(existing?.provenance ?? []), 'wmpf.addJsContext'])],
       runtimeGeneration: session.runtimeGeneration,
@@ -550,9 +527,21 @@ export class SessionManager {
     if (this.bridge.isConnected(sessionId)) void this.probeContext(session, value.id);
   }
 
+  private async observeForceDebug(session: WxmpSession): Promise<void> {
+    if (!session.frida?.forceDebugTrigger) return;
+    try {
+      const observation = await session.frida.forceDebugTrigger();
+      await session.evidence.append('frida.force_debug_trigger', observation);
+    } catch (error) {
+      await session.evidence.append('frida.force_debug_trigger_gap', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private updateState(session: WxmpSession, state: SessionState): void {
-    session.state = state;
-    session.updatedAt = new Date().toISOString();
+    session.state = transitionSessionState(session.state, state);
+    session.updatedAt = this.now().toISOString();
   }
 
   private async recordProtocolEnvelope(sessionId: string, observation: BridgeEnvelopeObservation): Promise<void> {
@@ -589,7 +578,7 @@ export class SessionManager {
   }
 
   recordFinding(session: WxmpSession, input: Pick<EvidenceFinding, 'id' | 'title' | 'severity' | 'summary' | 'evidenceTypes'>): void {
-    const now = new Date().toISOString();
+    const now = this.now().toISOString();
     const existing = session.findings.find((finding) => finding.id === input.id);
     if (existing) {
       existing.title = input.title;
@@ -607,7 +596,7 @@ export class SessionManager {
     const finding = session.findings.find((entry) => entry.id === id);
     if (!finding) return;
     finding.status = 'resolved';
-    finding.lastObservedAt = new Date().toISOString();
+    finding.lastObservedAt = this.now().toISOString();
   }
 
   private async activateConnectedSession(session: WxmpSession, generation: number): Promise<void> {
@@ -644,7 +633,7 @@ export class SessionManager {
       }
     }
     if (session.runtimeGeneration !== generation || !this.bridge.isConnected(session.id)) return;
-    this.refreshContextCapabilities(session);
+    refreshContextCapabilities(session);
     await this.probeContexts(session.id).catch(() => undefined);
   }
 
@@ -674,15 +663,15 @@ export class SessionManager {
         : context.role === 'appservice' || context.role === 'webview' ? 'miniapp'
         : context.kind;
       context.probeConfidence = context.hasWx || context.contextType ? 'high' : context.origin?.includes('servicewechat') ? 'medium' : 'low';
-      context.probedAt = new Date().toISOString();
-      this.refreshContextCapabilities(session);
+      context.probedAt = this.now().toISOString();
+      refreshContextCapabilities(session);
       const selected = session.contexts.get(session.selectedContextId);
       if (!selected || contextScore(context) > contextScore(selected)) session.selectedContextId = context.id;
       this.resolveFinding(session, `context-probe-${context.id}`);
       await session.evidence.append('context.probed', context, { contextId });
     } catch (error) {
       context.probeConfidence = 'low';
-      context.probedAt = new Date().toISOString();
+      context.probedAt = this.now().toISOString();
       this.recordFinding(session, {
         id: `context-probe-${context.id}`,
         title: `Context ${context.id} capability probe failed`,
@@ -696,26 +685,8 @@ export class SessionManager {
     }
   }
 
-  private refreshContextCapabilities(session: WxmpSession): void {
-    for (const context of session.contexts.values()) {
-      const capabilities = new Set(['evaluate', 'capability-probe']);
-      if (context.active === false) {
-        context.capabilities = ['capability-probe'];
-        continue;
-      }
-      if (session.capabilities.debugger) capabilities.add('debugger');
-      if (session.networkContextIds.has('*') || session.networkContextIds.has(context.id)) capabilities.add('network');
-      if (context.hasWx) capabilities.add('wx-api');
-      if (session.traceContextIds.has(context.id) && context.hasWx) capabilities.add('wx-trace');
-      if (session.requestHookContextIds.has(context.id)) capabilities.add('request-hook');
-      context.capabilities = [...capabilities];
-    }
-  }
-
   private selectBestContext(session: WxmpSession): void {
-    const next = [...session.contexts.values()].filter((context) => context.active !== false)
-      .sort((left, right) => contextScore(right) - contextScore(left))[0];
-    session.selectedContextId = next?.id ?? '';
+    session.selectedContextId = selectBestContextId(session.contexts.values());
   }
 
   private handleFridaDetached(sessionId: string, event: { reason: string; crash: unknown }): void {
@@ -758,22 +729,4 @@ export class SessionManager {
       });
     });
   }
-}
-
-function inferContextRole(context: WmpfContext): WmpfContext['role'] {
-  const marker = `${context.contextType ?? ''} ${context.envType ?? ''} ${context.name}`.toLowerCase();
-  if (marker.includes('game')) return 'minigame';
-  if (marker.includes('service') || marker.includes('maincontext') || marker.includes('subcontext') || context.hasWx) return 'appservice';
-  if (marker.includes('webview') || marker.includes('render')) return 'webview';
-  if (marker.includes('worker')) return 'worker';
-  return 'unknown';
-}
-
-function contextScore(context: WmpfContext): number {
-  if (context.hasWx) return 100;
-  if (context.role === 'appservice') return 80;
-  if (context.hasWxConfig) return 60;
-  if (context.role === 'minigame') return 50;
-  if (context.role === 'webview') return 30;
-  return 0;
 }

@@ -1,5 +1,6 @@
 import { EvidenceStore } from '../evidence/store.js';
-import { CdpExecutionContext, NetworkRecord, ScriptRecord } from '../types.js';
+import { CdpExecutionContext, LogicalBreakpoint, NetworkRecord, ScriptRecord, WebSocketRecord } from '../types.js';
+import { MAX_WEBSOCKET_FRAMES, isWasmScript, truncateWebSocketPayload } from '../runtime/debugger.js';
 import { WxmpError } from '../errors.js';
 
 interface PendingCommand {
@@ -19,8 +20,15 @@ export class CdpChannel {
   readonly scripts = new Map<string, ScriptRecord>();
   readonly requests = new Map<string, NetworkRecord>();
   readonly executionContexts = new Map<string, CdpExecutionContext>();
+  readonly breakpoints = new Map<string, LogicalBreakpoint>();
+  readonly xhrBreakpoints = new Map<string, LogicalBreakpoint>();
+  readonly websockets = new Map<string, WebSocketRecord>();
   lastPaused: Record<string, unknown> | null = null;
+  lastPausedContextId?: string;
+  debuggerGeneration = 0;
+  pauseOnExceptions: 'none' | 'uncaught' | 'all' = 'none';
   traceActive = false;
+  private breakpointSeq = 0;
 
   constructor(
     readonly sessionId: string,
@@ -98,11 +106,14 @@ export class CdpChannel {
         length: params.length === undefined ? undefined : Number(params.length),
         sourceMapURL: params.sourceMapURL === undefined ? undefined : String(params.sourceMapURL),
       };
+      if (params.scriptLanguage !== undefined) script.scriptLanguage = String(params.scriptLanguage);
       if (script.scriptId) this.scripts.set(compositeKey(eventContextId, script.scriptId), script);
     } else if (method === 'Debugger.paused') {
       this.lastPaused = params;
+      this.lastPausedContextId = eventContextId;
     } else if (method === 'Debugger.resumed') {
       this.lastPaused = null;
+      this.lastPausedContextId = undefined;
     } else if (method === 'Network.requestWillBeSent') {
       const request = (params.request ?? {}) as Record<string, unknown>;
       const requestId = String(params.requestId ?? '');
@@ -118,6 +129,9 @@ export class CdpChannel {
           timestamp: params.timestamp === undefined ? undefined : Number(params.timestamp),
           transport: 'cdp',
           transportOptions: { observedBy: 'CDP.Network' },
+          initiator: params.initiator && typeof params.initiator === 'object'
+            ? params.initiator as Record<string, unknown>
+            : undefined,
         });
       }
     } else if (method === 'Network.responseReceived') {
@@ -132,6 +146,8 @@ export class CdpChannel {
           headers: normalizeHeaders(response.headers),
         };
       }
+    } else if (method.startsWith('Network.webSocket')) {
+      this.trackWebSocket(method, params, eventContextId);
     } else if (method === 'Runtime.executionContextCreated') {
       const context = (params.context ?? {}) as Record<string, unknown>;
       const id = String(context.id ?? '');
@@ -268,7 +284,108 @@ export class CdpChannel {
     this.scripts.clear();
     this.requests.clear();
     this.lastPaused = null;
+    this.lastPausedContextId = undefined;
     this.traceActive = false;
+    this.invalidateDebuggerIds();
+  }
+
+  pausedParams(): Record<string, unknown> | null {
+    return this.lastPaused;
+  }
+
+  registerBreakpoint(input: Omit<LogicalBreakpoint, 'logicalId' | 'createdAt' | 'generation'> & { generation?: number }): LogicalBreakpoint {
+    const logicalId = `bp-${++this.breakpointSeq}`;
+    const record: LogicalBreakpoint = {
+      ...input,
+      logicalId,
+      generation: input.generation ?? this.debuggerGeneration,
+      createdAt: new Date().toISOString(),
+    };
+    if (record.kind === 'xhr') this.xhrBreakpoints.set(record.spec.url ?? '', record);
+    else this.breakpoints.set(logicalId, record);
+    return record;
+  }
+
+  findBreakpoint(id: string): LogicalBreakpoint | undefined {
+    return this.breakpoints.get(id)
+      ?? [...this.breakpoints.values()].find((item) => item.cdpBreakpointId === id)
+      ?? [...this.xhrBreakpoints.values()].find((item) => item.logicalId === id || item.spec.url === id);
+  }
+
+  removeLogicalBreakpoint(id: string): LogicalBreakpoint | undefined {
+    const record = this.findBreakpoint(id);
+    if (!record) return undefined;
+    this.breakpoints.delete(record.logicalId);
+    if (record.kind === 'xhr') this.xhrBreakpoints.delete(record.spec.url ?? '');
+    return record;
+  }
+
+  wasmScripts(): ScriptRecord[] {
+    return [...this.scripts.values()].filter((script) => isWasmScript(script));
+  }
+
+  findWebSocket(requestId: string, preferredContextId?: string): WebSocketRecord | null {
+    return findIndexed(this.websockets, requestId, preferredContextId, 'WEBSOCKET_ID_AMBIGUOUS');
+  }
+
+  private invalidateDebuggerIds(): void {
+    this.debuggerGeneration += 1;
+    for (const breakpoint of this.breakpoints.values()) {
+      if (breakpoint.status === 'stale') continue;
+      breakpoint.status = 'stale';
+      breakpoint.staleReason = 'runtime disconnected; CDP breakpoint IDs are no longer valid';
+    }
+    for (const socket of this.websockets.values()) socket.stale = true;
+  }
+
+  private trackWebSocket(method: string, params: Record<string, unknown>, contextId?: string): void {
+    const requestId = String(params.requestId ?? '');
+    if (!requestId) return;
+    const key = compositeKey(contextId, requestId);
+    let record = this.websockets.get(key);
+    if (!record) {
+      record = {
+        requestId,
+        contextId,
+        url: String(params.url ?? ''),
+        createdAt: new Date().toISOString(),
+        frames: [],
+        droppedFrames: 0,
+      };
+      this.websockets.set(key, record);
+    }
+    if (method === 'Network.webSocketCreated') {
+      record.url = String(params.url ?? record.url);
+    } else if (method === 'Network.webSocketWillSendHandshakeRequest') {
+      const request = params.request && typeof params.request === 'object' ? params.request as Record<string, unknown> : {};
+      record.handshake = { ...record.handshake, requestHeaders: normalizeHeaders(request.headers) };
+    } else if (method === 'Network.webSocketHandshakeResponseReceived') {
+      const response = params.response && typeof params.response === 'object' ? params.response as Record<string, unknown> : {};
+      record.handshake = {
+        ...record.handshake,
+        responseHeaders: normalizeHeaders(response.headers),
+        status: response.status === undefined ? undefined : Number(response.status),
+      };
+    } else if (method === 'Network.webSocketFrameSent' || method === 'Network.webSocketFrameReceived') {
+      const response = params.response && typeof params.response === 'object' ? params.response as Record<string, unknown> : {};
+      const truncated = truncateWebSocketPayload(response.payloadData);
+      record.frames.push({
+        direction: method === 'Network.webSocketFrameSent' ? 'sent' : 'received',
+        opcode: response.opcode === undefined ? undefined : Number(response.opcode),
+        payload: truncated.payload,
+        truncated: truncated.truncated,
+        timestamp: params.timestamp === undefined ? undefined : Number(params.timestamp),
+      });
+      if (record.frames.length > MAX_WEBSOCKET_FRAMES) {
+        const extra = record.frames.length - MAX_WEBSOCKET_FRAMES;
+        record.frames.splice(0, extra);
+        record.droppedFrames += extra;
+      }
+    } else if (method === 'Network.webSocketClosed') {
+      record.closedAt = new Date().toISOString();
+    } else if (method === 'Network.webSocketFrameError') {
+      record.error = String(params.errorMessage ?? 'websocket frame error');
+    }
   }
 
   close(reason = 'session closed'): void {

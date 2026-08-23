@@ -1,5 +1,6 @@
 import { WxmpApp } from '../app.js';
 import { VERSION } from '../version.js';
+import { DEFAULT_RUNTIME_WAIT_MS } from '../sessions/machine.js';
 import { entry, int, numberProp, objectSchema, optionalText, result, stringProp, text } from './helpers.js';
 import { ToolEntry } from './types.js';
 
@@ -41,7 +42,7 @@ export function buildSessionTools(app: WxmpApp): ToolEntry[] {
 
     entry('wxmp_session_status', 'Read one session state, capabilities, contexts, and evidence path.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => result(app.sessions.publicStatus(app.sessions.get(text(args, 'session_id'))))),
 
-    entry('wxmp_wait_for_runtime', 'Wait for an attached or disconnected WMPF session to connect again without reinjecting Frida.', objectSchema({ session_id: stringProp('Session identifier.'), timeout_ms: numberProp('Wait timeout in milliseconds.') }, ['session_id']), async (args) => result(await app.sessions.waitForRuntime(text(args, 'session_id'), int(args, 'timeout_ms', 30_000, 1, 120_000)))),
+    entry('wxmp_wait_for_runtime', 'Wait for an attached or disconnected WMPF session to connect again without reinjecting Frida.', objectSchema({ session_id: stringProp('Session identifier.'), timeout_ms: numberProp('Wait timeout in milliseconds.') }, ['session_id']), async (args) => result(await app.sessions.waitForRuntime(text(args, 'session_id'), int(args, 'timeout_ms', DEFAULT_RUNTIME_WAIT_MS, 1, 120_000)))),
 
     entry('wxmp_list_contexts', 'List JS contexts observed for a WMPF session.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => {
       const session = app.sessions.get(text(args, 'session_id'));

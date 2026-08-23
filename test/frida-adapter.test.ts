@@ -87,3 +87,31 @@ test('FridaRuntimeAdapter unloads the script and detaches when script loading fa
   assert.equal(unloadCalls, 1);
   assert.equal(detachCalls, 1);
 });
+
+test('FridaRuntimeAdapter forwards hook RPC status and forceDebugTrigger', async () => {
+  const script = {
+    exports: {
+      status: async () => ({ ready: true, cdpFilterAttached: true }),
+      forceDebugTrigger: async () => ({ mode: 'observation', attemptedNativeCall: false }),
+    },
+    message: { connect: () => undefined },
+    load: async () => undefined,
+    unload: async () => undefined,
+  };
+  const session = {
+    detached: { connect: () => undefined },
+    createScript: async (source: string) => {
+      assert.match(source, /rpc\.exports/);
+      return script;
+    },
+    detach: async () => undefined,
+  };
+  const fakeFrida = {
+    getLocalDevice: async () => ({ attach: async () => session }),
+  } as unknown as Pick<typeof import('frida'), 'getLocalDevice'>;
+  const adapter = new FridaRuntimeAdapter(async () => fakeFrida);
+  const handle = await adapter.attach(target, profile, () => undefined);
+  assert.deepEqual(await handle.status(), { ready: true, cdpFilterAttached: true });
+  assert.deepEqual(await handle.forceDebugTrigger(), { mode: 'observation', attemptedNativeCall: false });
+  await handle.detach();
+});

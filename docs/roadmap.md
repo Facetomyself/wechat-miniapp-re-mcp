@@ -1,10 +1,10 @@
 # 后续完善路线图
 
-> 状态：当前后续规划的 canonical source。
+> 状态：0.4.x 历史 backlog。无干预运行时重构以 [`runtime-contract.md`](runtime-contract.md) 为 canonical source。
 >
-> 最近更新：2026-07-29
+> 最近更新：2026-08-22
 >
-> 适用基线：`fix/project-review-p0` / `0.4.0` working tree；本地 static/unit/contract gate 已通过，真实 target 新链路尚未验收
+> 适用基线：`0.4.0` / `origin/main`；本地 static/unit/contract gate 已通过，真实 target 新链路尚未验收。M0 已冻结状态机、seam 与 Agent surface 目标，不改公共 tool schema。
 
 当前实施状态：
 

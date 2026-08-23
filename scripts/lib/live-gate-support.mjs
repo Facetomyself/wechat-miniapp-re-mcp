@@ -195,13 +195,13 @@ export function usage() {
   return `Usage: node scripts/live-semantic-gate.mjs [options]
 
 Options:
-  --wmpf-version <number>            Require and select one WMPF version.
+  --wmpf-version <number>            Require and select one WMPF version. Omit to use the current main target.
   --pid <number>                     Select an explicit main WMPF PID.
   --project <name>                   Evidence project name (default: live-verification).
   --workspace-root <path>            Workspace root (default: WXMP_WORKSPACE_ROOT or reverse_ENV/workspace).
   --profile-path <path>              Use an explicit reviewed profile.
-  --connect-timeout-ms <number>      Initial bridge wait (default: 15000).
-  --runtime-wait-timeout-ms <number> Additional runtime wait (default: 30000).
+  --connect-timeout-ms <number>      Initial wxmp_open / bridge wait (default: 60000).
+  --runtime-wait-timeout-ms <number> Additional parked-session wait (default: 60000).
   --context-timeout-ms <number>      AppService discovery window (default: 20000).
   --reconnect-timeout-ms <number>    Same-session reconnect wait (default: 60000).
   --skip-reconnect                   Run a reduced gate; cannot establish full-semantic acceptance.

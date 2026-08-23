@@ -33,12 +33,16 @@ test('server validates tool-specific JSON schemas before invoking handlers', asy
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   try {
-    const health = await client.callTool({ name: 'wxmp_health', arguments: {} });
+    const health = await client.callTool({ name: 'wxmp_doctor', arguments: {} });
     assert.equal(health.isError, undefined);
     assert.equal((health.structuredContent as Record<string, unknown>).ok, true);
     const listed = await client.listTools();
-    assert.equal(listed.tools.length, 16);
+    assert.equal(listed.tools.length, 18);
     assert.ok(listed.tools.some((tool) => tool.name === 'wxmp_open'));
+    assert.ok(listed.tools.some((tool) => tool.name === 'wxmp_evaluate'));
+    assert.ok(listed.tools.some((tool) => tool.name === 'wxmp_list_scripts'));
+    assert.ok(listed.tools.some((tool) => tool.name === 'wxmp_correlate'));
+    assert.ok(!listed.tools.some((tool) => tool.name === 'wxmp_health'));
     assert.ok(!listed.tools.some((tool) => tool.name === 'wxmp_raw_cdp'));
     for (const listedTool of listed.tools) {
       assert.ok(listedTool.title);
@@ -46,7 +50,11 @@ test('server validates tool-specific JSON schemas before invoking handlers', asy
       assert.ok(listedTool.annotations);
     }
     const expertTools = buildTools(app, 'expert');
-    assert.equal(expertTools.length, 59);
+    assert.equal(expertTools.length, 70);
+    assert.ok(expertTools.some((entry) => entry.tool.name === 'wxmp_get_paused_state'));
+    assert.ok(expertTools.some((entry) => entry.tool.name === 'wxmp_save_wasm'));
+    assert.equal(expertTools.find((entry) => entry.tool.name === 'wxmp_evaluate_on_call_frame')?.tool.annotations?.destructiveHint, true);
+    assert.equal(expertTools.find((entry) => entry.tool.name === 'wxmp_get_paused_state')?.tool.annotations?.readOnlyHint, true);
     assert.equal(expertTools.find((entry) => entry.tool.name === 'wxmp_pause_info')?.tool.annotations?.destructiveHint, false);
     assert.equal(expertTools.find((entry) => entry.tool.name === 'wxmp_trace_query')?.tool.annotations?.readOnlyHint, true);
     assert.equal(expertTools.find((entry) => entry.tool.name === 'wxmp_evaluate')?.tool.annotations?.destructiveHint, true);

@@ -2,7 +2,7 @@ import { WxmpApp } from '../app.js';
 import { WxmpError } from '../errors.js';
 import { VERSION } from '../version.js';
 
-export const SERVER_INSTRUCTIONS = `Use wxmp_open as the normal entrypoint. It discovers a WMPF target, validates the runtime profile, attaches, reconnects, selects an AppService context, enables observation, and returns recovery actions when a foreground/reload transition is required. Use wxmp_status before low-level recovery. Dynamic follow-up calls always carry session_id; agent tools select a context internally unless an expert override is needed. Reads of request hooks are non-destructive. Unknown WMPF protocol envelopes are persisted as bounded evidence artifacts. Set WXMP_TOOLSET=expert only when raw CDP, breakpoint, Profile, or protocol-level primitives are required.`;
+export const SERVER_INSTRUCTIONS = `Follow wxmp_doctor -> wxmp_open -> inspect -> wxmp_close. wxmp_open discovers the WMPF target, validates the runtime profile, attaches, waits or resumes a parked session, selects AppService, and returns resumeTool/resumeArguments when a foreground/reload is required. After open, use wxmp_evaluate, wxmp_list_scripts, wxmp_search_sources, wxmp_get_api_inventory, wxmp_observe_window, and wxmp_correlate. Always pass session_id; do not invent context_id. Request-hook reads are non-destructive. Set WXMP_TOOLSET=expert only for raw CDP, breakpoints, Profile internals, or adapter escape hatches.`;
 
 interface PromptDefinition {
   name: string;
@@ -18,7 +18,7 @@ const PROMPTS: PromptDefinition[] = [
     title: 'WeChat Miniapp Recon',
     description: 'Bootstrap a mini-program session and collect a bounded runtime/API reconnaissance snapshot.',
     arguments: [{ name: 'project_name', description: 'Evidence workspace project name.' }],
-    render: (args) => `Perform bounded WeChat mini-program reconnaissance${args.project_name ? ` for project ${args.project_name}` : ''}. Start with wxmp_doctor, call wxmp_open once, follow its nextActions without inventing context IDs, then use wxmp_app_snapshot, wxmp_observe_window, wxmp_get_api_inventory, and wxmp_export_evidence. Distinguish verified runtime facts from pending capabilities.`,
+    render: (args) => `Perform bounded WeChat mini-program reconnaissance${args.project_name ? ` for project ${args.project_name}` : ''}. Start with wxmp_doctor, call wxmp_open once, follow its nextActions without inventing context IDs, then use wxmp_evaluate, wxmp_list_scripts, wxmp_app_snapshot, wxmp_get_api_inventory, wxmp_correlate, and wxmp_export_evidence. Distinguish verified runtime facts from pending capabilities.`,
   },
   {
     name: 'wxmp-protocol-recovery',

@@ -96,6 +96,11 @@ export interface OffsetProfile {
     confidence: 'high' | 'medium' | 'candidate' | 'external';
     note?: string;
   };
+  extractor?: {
+    name: string;
+    version: string;
+    outputPath?: string;
+  };
   review?: ProfileReview;
 }
 
@@ -130,6 +135,7 @@ export interface NetworkRecord {
   timestamp?: number;
   transport: 'wx.request' | 'fetch' | 'xhr' | 'cdp';
   transportOptions?: Record<string, unknown>;
+  initiator?: Record<string, unknown>;
   hookCursor?: number;
   response?: {
     status: number;
@@ -147,4 +153,82 @@ export interface ScriptRecord {
   hash?: string;
   length?: number;
   sourceMapURL?: string;
+  scriptLanguage?: string;
+}
+
+export type DebuggerBreakpointStatus = 'bound' | 'pending' | 'stale';
+
+export interface LogicalBreakpoint {
+  logicalId: string;
+  kind: 'script' | 'url' | 'urlRegex' | 'xhr';
+  spec: {
+    scriptId?: string;
+    url?: string;
+    urlRegex?: string;
+    lineNumber?: number;
+    columnNumber?: number;
+    condition?: string;
+  };
+  cdpBreakpointId?: string;
+  locations: unknown[];
+  pending: boolean;
+  status: DebuggerBreakpointStatus;
+  staleReason?: string;
+  generation: number;
+  createdAt: string;
+}
+
+export interface PausedScope {
+  type: string;
+  name?: string;
+  objectId?: string;
+}
+
+export interface PausedCallFrame {
+  callFrameId: string;
+  functionName: string;
+  url?: string;
+  location: {
+    scriptId: string;
+    lineNumber: number;
+    columnNumber?: number;
+  };
+  scopeChain: PausedScope[];
+}
+
+export interface PausedState {
+  paused: boolean;
+  reason?: string;
+  hitBreakpoints: string[];
+  selectedFrameIndex: number;
+  callFrames: PausedCallFrame[];
+  selectedFrame?: PausedCallFrame;
+  contextId?: string;
+  data?: Record<string, unknown>;
+  generation?: number;
+}
+
+export interface WebSocketFrame {
+  direction: 'sent' | 'received';
+  opcode?: number;
+  payload: string;
+  truncated: boolean;
+  timestamp?: number;
+}
+
+export interface WebSocketRecord {
+  requestId: string;
+  contextId?: string;
+  url: string;
+  createdAt: string;
+  closedAt?: string;
+  stale?: boolean;
+  handshake?: {
+    requestHeaders?: Record<string, string>;
+    responseHeaders?: Record<string, string>;
+    status?: number;
+  };
+  frames: WebSocketFrame[];
+  droppedFrames: number;
+  error?: string;
 }

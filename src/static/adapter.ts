@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { AppConfig, defaultPackageRoots } from '../config.js';
 import { WxmpError } from '../errors.js';
 import { resolveInside, safeProjectName } from '../security.js';
+import { IndexSourceFile, buildStaticIndexFromFiles } from './index-v2.js';
 
 const execFileAsync = promisify(execFile);
 const TEXT_EXTENSIONS = new Set(['.js', '.json', '.wxml', '.wxss', '.wxs', '.html', '.css', '.ts', '.txt', '.md']);
@@ -153,33 +154,39 @@ export class StaticAdapter {
     const base = path.resolve(root);
     const rootStat = await fs.stat(base).catch(() => null);
     if (!rootStat?.isDirectory()) throw new WxmpError('STATIC_ROOT_NOT_FOUND', `Static output directory does not exist: ${base}`);
-    const urls = new Set<string>();
-    const wxApis = new Set<string>();
-    const routes = new Set<string>();
-    const files: Array<{ path: string; size: number }> = [];
+    const sources: IndexSourceFile[] = [];
     await walk(base, async (filePath, stat) => {
-      files.push({ path: filePath, size: stat.size });
-      if (stat.size > 8 * 1024 * 1024 || !TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase())) return;
-      const content = await fs.readFile(filePath, 'utf8').catch(() => '');
-      for (const match of content.matchAll(/https?:\/\/[^\s"'`<>]+/g)) urls.add(match[0]);
-      for (const match of content.matchAll(/\bwx\.([A-Za-z_$][\w$]*)/g)) wxApis.add(match[1]);
-      for (const match of content.matchAll(/(?:navigateTo|redirectTo|reLaunch|switchTab)\s*\(\s*\{[^}]*?url\s*:\s*["'`]([^"'`]+)["'`]/g)) routes.add(match[1]);
+      const relativePath = path.relative(base, filePath).replaceAll('\\', '/');
+      const ext = path.extname(filePath).toLowerCase();
+      const readable = stat.size <= 8 * 1024 * 1024 && TEXT_EXTENSIONS.has(ext);
+      sources.push({
+        relativePath,
+        size: stat.size,
+        content: readable ? await fs.readFile(filePath, 'utf8').catch(() => '') : undefined,
+      });
     }, 30);
+    const index = buildStaticIndexFromFiles(base, sources);
     const project = safeProjectName(projectName);
     const artifactDir = resolveInside(this.config.workspaceRoot, project, 'wechat-miniapp', 'static', 'indexes');
     await fs.mkdir(artifactDir, { recursive: true });
-    const outputPath = resolveInside(artifactDir, `index-${Date.now()}.json`);
-    const index = {
-      schemaVersion: 1,
-      root: base,
-      generatedAt: new Date().toISOString(),
-      fileCount: files.length,
-      urls: [...urls].sort(),
-      wxApis: [...wxApis].sort(),
-      routes: [...routes].sort(),
+    const stamp = Date.now();
+    const outputPath = resolveInside(artifactDir, `index-v2-${stamp}.json`);
+    const summaryPath = resolveInside(artifactDir, `index-summary-${stamp}.json`);
+    const summary = {
+      schemaVersion: 2,
+      root: index.root,
+      generatedAt: index.generatedAt,
+      kind: index.kind,
+      summary: index.summary,
+      pages: index.manifest.pages,
+      subPackages: index.manifest.subPackages,
+      routes: index.routeHits.slice(0, 200),
+      apis: index.apiHits.slice(0, 200),
+      urls: index.urlHits.slice(0, 200),
     };
     await fs.writeFile(outputPath, `${JSON.stringify(index, null, 2)}\n`, 'utf8');
-    return { ...index, outputPath };
+    await fs.writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    return { ...index, outputPath, summaryPath };
   }
 
   private requireBackend(): string {

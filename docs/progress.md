@@ -1,8 +1,15 @@
 # Progress and Acceptance Status
 
-Last updated: 2026-07-29
+Last updated: 2026-08-23
 
 Current working state:
+
+- Child branch: `refactor/runtime-kernel` (v0.5.2 unattended runtime kernel)
+- Package version: `0.5.2`
+- Local `npm run check`: 158 tests, 18 agent / 70 expert contract and stdio smoke
+- 2026-08-23 WMPF 20079 live run: Frida hookAttach passed; `runtimeBridge` failed after the 60s `wxmp_open` wait because `127.0.0.1:9421` had no WMPF owner. Full-semantic remains runtime-pending. Summary: `workspace/live-verification-m7/wechat-miniapp/live-semantic-gate-v0.5.2-wmpf20079-1787463719355.json`
+
+Historical working state at v0.4.0:
 
 - Child branch: `fix/project-review-p0` (uncommitted v0.4.0 implementation; local static/unit/contract gates complete, real WMPF workflow runtime-pending)
 - Package version: `0.4.0`
@@ -12,6 +19,14 @@ Current working state:
 - Future product work and acceptance priorities are tracked in [`roadmap.md`](roadmap.md); this file records achieved capability gates only.
 
 The project is not marked complete by a percentage. Transport connectivity, tool invocation, semantic capability success, and repeatability are tracked as separate gates.
+
+## v0.5.2 unattended runtime kernel
+
+- Session wait default is 60s. Parked `waiting_for_runtime` / `disconnected` sessions resume with the same `session_id` and do not re-inject Frida.
+- Missing injectable Profiles: `wxmp_open` copies `flue.dll`, runs `wmpf-offset-adaptation`, smoke-attests Frida RPC, and promotes `extractor+runtime-smoke`. Historical RVAs are not a fallback.
+- Expert debugger primitives: paused state, scoped variables, call-frame evaluate, XHR/exception breakpoints, initiator, WebSocket frames, WASM save. Reconnect marks logical breakpoints `stale`.
+- Restored-source index schema v2 plus correlate of AppID/URL/initiator/script/route. Gwxapkg remains a subprocess adapter.
+- Live runner calls `wxmp_doctor` then `wxmp_open`, auto-selects the current main WMPF when `--wmpf-version` is omitted, and uses a 60s MCP/tool timeout. A 20079 live attempt attached Frida and exported evidence; the mini-program did not connect to the debug bridge.
 
 ## v0.4.0 agent-first MCP optimization
 

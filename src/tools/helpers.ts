@@ -122,7 +122,7 @@ function titleFromName(name: string): string {
 function inferAnnotations(name: string, title: string) {
   const readOnly = /_(health|doctor|status|info|list|search|scan|probe|snapshot|get|query|detect|validate)(?:_|$)/.test(name)
     && !/_(build_index|open|observe)/.test(name);
-  const destructive = /_(close|detach|remove(?:_|$)|repack|promote|call(?:_|$)|replay|evaluate$|raw_cdp|raw_adapter|set_breakpoint|pause$|resume$|step_)/.test(name);
+  const destructive = /_(close|detach|remove(?:_|$)|repack|promote|call(?:_|$)|replay|evaluate(?:_|$)|raw_cdp|raw_adapter|set_breakpoint|break_on|set_pause_on|pause$|resume$|step_)/.test(name);
   const idempotent = readOnly;
   const openWorld = /_(attach|open|wait|capture|trace|hook|request|cloud|api|evaluate|debugger|decompile|unpack|repack|raw|proxy)/.test(name);
   return {
