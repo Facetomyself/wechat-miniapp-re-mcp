@@ -4,13 +4,13 @@ Last updated: 2026-08-23 (paused)
 
 Current working state:
 
-- Child branch: `refactor/runtime-kernel` @ `42402d3187b4e82abdd2cc30ff622e4aa1ca2b6f` (v0.5.2 unattended runtime kernel)
+- Child branch: `refactor/runtime-kernel` (v0.5.2 unattended runtime kernel at `42402d3`, plus live-gate AppService 60s wait on this branch)
 - Package version: `0.5.2`
 - Public PR: https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/18 (OPEN vs `main`)
-- Parent gitlink: `reverse_ENV` `1cb426b` points at the same child SHA
-- Last recorded local check at `42402d3`: 158 tests, 18 agent / 70 expert contract and stdio smoke
+- Parent gitlink: `reverse_ENV` will refresh after this branch push; previous pin was `1cb426b` → `42402d3`
+- Last recorded local check: 158 tests at `42402d3`; live-gate wait change re-ran `npm test` (158 pass)
 - Pause: 2026-08-23 operator stopped further live-gate attempts. Do not claim a v20079 full-semantic pass.
-- Working tree (not in `42402d3`): live-gate AppService wait raised to 60s with `wxmp_wait_for_runtime` retry on empty/`RUNTIME_NOT_CONNECTED`; this pause's progress/lessons/review documents. Analysis: [`reviews/2026-08-23-wmpf20079-unattended-runtime/report.md`](reviews/2026-08-23-wmpf20079-unattended-runtime/report.md)
+- Live-gate AppService wait is 60s with `wxmp_wait_for_runtime` retry on empty/`RUNTIME_NOT_CONNECTED`. Analysis: [`reviews/2026-08-23-wmpf20079-unattended-runtime/report.md`](reviews/2026-08-23-wmpf20079-unattended-runtime/report.md)
 - Strongest v20079 live evidence: `workspace/live-verification-m7/wechat-miniapp/live-semantic-gate-v0.5.2-wmpf20079-1787474159248.json` (SHA-256 `1aa5d57aed2e380530d474c14439a70286dbab16d6668f97dbbcd27181610516`) — Frida + 9421 + CDP Debugger/Network passed; AppService probe returned zero WMPF contexts.
 
 Historical working state at v0.4.0:
