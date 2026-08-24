@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "review": {
+    "date": "2026-08-23",
+    "repository": "mcp/wechat-miniapp-re-mcp",
+    "branch": "refactor/runtime-kernel",
+    "commit": "42402d3187b4e82abdd2cc30ff622e4aa1ca2b6f",
+    "packageVersion": "0.5.2",
+    "paused": true,
+    "scope": [
+      "unattended runtime kernel M0-M7",
+      "WMPF 20079 live-semantic-gate",
+      "9421 lifecycle",
+      "AppService context selection"
+    ]
+  },
+  "findings": [
+    {
+      "id": "RT-001",
+      "priority": "P0",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "9421 connect requires LoadStart after Frida ready",
+      "claim": "Frida cdp_filter_attached and load_start_attached do not make WMPF own 127.0.0.1:9421. loadStartEntered stays 0 unless the mini-program is closed and reopened after inject.",
+      "evidence": [
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/live-semantic-gate-v0.5.2-wmpfauto-1787474668258.json",
+          "sha256": "0badd124888640ec3f0a19df9f0055778abdca77b9f68f36ba15c296e6dbc176",
+          "observation": "hookAttach passed; runtimeBridge failed; frida.message=6; loadStartEntered=0 for 120s"
+        },
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/sessions/wxmp-db6c0696-e191-4714-a4f4-475b7deb90f3/events.ndjson",
+          "observation": "ready at 08:44:33.676Z; attach_result connected=false at 08:45:33.691Z; wait_result connected=false at 08:46:33.710Z"
+        },
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/live-semantic-gate-v0.5.2-wmpf20079-1787474159248.json",
+          "sha256": "1aa5d57aed2e380530d474c14439a70286dbab16d6668f97dbbcd27181610516",
+          "observation": "post-inject close+reopen: runtimeBridge passed, frida.message=893, runtime.connected=3"
+        }
+      ],
+      "impact": "Unattended attach still has one irreducible human lifecycle step. Live full-semantic cannot start without it.",
+      "recommendation": "Keep the coordinated choreography: inject first, then close+reopen. Do not treat hook ready as bridge connected.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "RT-002",
+      "priority": "P0",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "forceDebugTrigger is observation-only",
+      "claim": "Hook RPC forceDebugTrigger reports counters but does not call the native CDP filter. attemptedNativeCall remains false.",
+      "evidence": [
+        {
+          "path": "docs/runtime-contract.md",
+          "observation": "NativeFunction calls are opt-in and must not crash WeChat"
+        },
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/sessions/wxmp-db6c0696-e191-4714-a4f4-475b7deb90f3/events.ndjson",
+          "observation": "force_debug_trigger mode=observation attemptedNativeCall=false cdpFilterEntered=0 loadStartEntered=0 calls=1 then 2"
+        }
+      ],
+      "impact": "Product cannot auto-trigger 9421. Calling this a completed unattended attach is false.",
+      "recommendation": "Leave the stub as observation. Any native call requires an explicit, crash-safe experiment and must not be the default live-gate path.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "RT-003",
+      "priority": "P0",
+      "severity": "high",
+      "status": "confirmed",
+      "title": "Connected 9421 session had zero WMPF AppService contexts",
+      "claim": "After runtimeBridge pass, wxmp_probe_contexts returned no contexts. session.contexts is filled only from addJsContext; this capture had no context.added events.",
+      "evidence": [
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/live-semantic-gate-v0.5.2-wmpf20079-1787474159248.json",
+          "observation": "appserviceContext failed; selectedContextId empty; contexts=[]"
+        },
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/sessions/wxmp-1a4846a1-e376-43fc-a6f4-abbb2ff187f5/artifacts/report.md",
+          "observation": "execution_added=4 execution_removed=4 scriptParsed=174 requestWillBeSent=46 setupContext=3; no context.added; contexts=[] at export"
+        },
+        {
+          "path": "src/sessions/manager.ts",
+          "observation": "handleContext add only from decoded addJsContext; probeContexts iterates session.contexts"
+        }
+      ],
+      "impact": "evaluate/breakpoint/trace/hooks cannot run. Full-semantic remains runtime-pending even when CDP is live.",
+      "recommendation": "On resume, keep probing after reconnect. If contexts stay empty, inspect setupContext artifacts clean-room; do not copy GPL decoders.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "RT-004",
+      "priority": "P1",
+      "severity": "medium",
+      "status": "confirmed",
+      "title": "Live-gate AppService loop lost reconnect churn",
+      "claim": "Committed runner defaulted contextTimeoutMs to 20s and used call(wxmp_probe_contexts), which throws RUNTIME_NOT_CONNECTED when the socket is down.",
+      "evidence": [
+        {
+          "path": "scripts/live-semantic-gate.mjs",
+          "observation": "committed default context-timeout-ms 20000; call() is fatal on tool error"
+        },
+        {
+          "path": "src/sessions/manager.ts",
+          "observation": "probeContexts throws RUNTIME_NOT_CONNECTED if bridge is not connected"
+        },
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/sessions/wxmp-1a4846a1-e376-43fc-a6f4-abbb2ff187f5/artifacts/report.md",
+          "observation": "runtime.connected=3 runtime.disconnected=2 during the AppService window"
+        }
+      ],
+      "impact": "A connected-then-churned runtime looks like 'no AppService' even if a later generation would register contexts.",
+      "recommendation": "Keep the working-tree 60s wait, wait_for_runtime retry, and active-only selection; commit before the next live attempt.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "RT-005",
+      "priority": "P1",
+      "severity": "medium",
+      "status": "insufficient-evidence",
+      "title": "setupContext may be the 20079 context registration face",
+      "claim": "The connected session recorded three unknown setupContext envelopes and zero addJsContext events. That is not proof that setupContext replaces addJsContext.",
+      "evidence": [
+        {
+          "path": "src/transport/protocol-registry.ts",
+          "observation": "known categories: chromeDevtools, chromeDevtoolsResult, addJsContext, removeJsContext"
+        },
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/sessions/wxmp-1a4846a1-e376-43fc-a6f4-abbb2ff187f5/artifacts/findings.json",
+          "observation": "unknown-protocol-setupContext open; payload SHA-256 83dc2c005d9636f9bb50f9e93dae9aab982bc222d35ab3200a55910d868937a2"
+        }
+      ],
+      "impact": "A 60s retry alone may still miss AppService if 20079 never sends addJsContext.",
+      "recommendation": "Clean-room inspect bounded protocol artifacts after the next connect. Do not import GPL generated protobuf.",
+      "confidence": "medium",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    },
+    {
+      "id": "RT-006",
+      "priority": "P2",
+      "severity": "low",
+      "status": "confirmed",
+      "title": "Unknown WMPF categories are retained as artifacts",
+      "claim": "customMessage, domEvent, and setupContext payloads were hashed and written under the session protocol directory instead of being dropped.",
+      "evidence": [
+        {
+          "runtimeArtifact": "workspace/live-verification-m7/wechat-miniapp/sessions/wxmp-1a4846a1-e376-43fc-a6f4-abbb2ff187f5/artifacts/findings.json",
+          "observation": "three open unknown-protocol findings with SHA-256 and evidenceTypes"
+        }
+      ],
+      "impact": "Protocol learning can continue from workspace artifacts without claiming decoders exist.",
+      "recommendation": "Keep bounded recorder. Promote a category to the known registry only after clean-room attestation.",
+      "confidence": "high",
+      "redaction": { "redacted": false, "redaction_method": "none", "raw_value_stored": false }
+    }
+  ]
+}

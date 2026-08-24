@@ -38,7 +38,7 @@ const expectedWmpfVersion = optionalInteger(options.wmpfVersion, 'wmpf-version',
 const expectedPid = optionalInteger(options.pid, 'pid', 1);
 const connectTimeoutMs = integerOption(options.connectTimeoutMs, 'connect-timeout-ms', 60_000, 1, 120_000);
 const runtimeWaitTimeoutMs = integerOption(options.runtimeWaitTimeoutMs, 'runtime-wait-timeout-ms', 60_000, 1, 120_000);
-const contextTimeoutMs = integerOption(options.contextTimeoutMs, 'context-timeout-ms', 20_000, 1, 120_000);
+const contextTimeoutMs = integerOption(options.contextTimeoutMs, 'context-timeout-ms', 60_000, 1, 120_000);
 const reconnectTimeoutMs = integerOption(options.reconnectTimeoutMs, 'reconnect-timeout-ms', 60_000, 1, 180_000);
 const nodePath = path.resolve(options.nodePath ?? process.execPath);
 const serverPath = path.resolve(options.serverPath ?? path.join(repositoryRoot, 'build', 'src', 'index.js'));
@@ -72,6 +72,8 @@ if (options.dryRun) {
     outputPath,
     connectTimeoutMs,
     runtimeWaitTimeoutMs,
+    contextTimeoutMs,
+    reconnectTimeoutMs,
     requiredGates,
   }, null, 2)}\n`);
   process.exit(0);
@@ -126,6 +128,16 @@ async function attempt(name, args = {}, timeoutMs = 90_000) {
     process.stdout.write(`[gate] ${name}: ERROR ${JSON.stringify(details)}\n`);
     return { ok: false, error, details };
   }
+}
+
+function toolErrorCode(result) {
+  return result?.details?.error?.code
+    || result?.error?.payload?.error?.code
+    || '';
+}
+
+function remainingMs(deadline) {
+  return Math.max(0, deadline - Date.now());
 }
 
 async function startFixtureServer() {
@@ -370,6 +382,7 @@ try {
     extractorStructured,
   } : generatedProfile.details);
 
+  process.stdout.write('[gate] inject: starting wxmp_open; after Frida attach, close then reopen the mini-program immediately and keep it in the foreground\n');
   const opened = await call('wxmp_open', {
     pid: main.pid,
     project_name: projectName,
@@ -429,36 +442,90 @@ try {
   });
   if (!attached.bridgeConnected) throw new Error(`WMPF runtime did not connect to the ${serverVersion} bridge`);
 
-  let probed;
+  let probed = null;
   let runtimeProbes = [];
   let appCandidate;
   let fetchCandidate;
   const contextAttempts = [];
   const contextDeadline = Date.now() + contextTimeoutMs;
-  do {
-    probed = await call('wxmp_probe_contexts', { session_id: sessionId }, 45_000);
-    runtimeProbes = [];
-    for (const context of probed.contexts) {
-      runtimeProbes.push({ context, runtime: await probeRuntimeContext(context.id) });
+  while (Date.now() < contextDeadline) {
+    const leftoverMs = remainingMs(contextDeadline);
+    const status = await attempt('wxmp_session_status', { session_id: sessionId }, 5_000);
+    const connected = status.ok && status.data.bridgeConnected === true;
+    if (!connected) {
+      contextAttempts.push({
+        observedAt: new Date().toISOString(),
+        reason: 'runtime-not-connected',
+        details: status.ok ? summarizeSessionStatus(status.data) : status.details,
+        remainingMs: leftoverMs,
+      });
+      process.stdout.write(`[gate] appserviceContext: WAITING ${JSON.stringify({ reason: 'runtime-not-connected', remainingMs: leftoverMs })}\n`);
+      const waitMs = Math.min(runtimeWaitTimeoutMs, leftoverMs);
+      if (waitMs < 1) break;
+      const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: waitMs }, waitMs + 10_000);
+      if (waited.ok) attached = waited.data;
+      continue;
     }
-    appCandidate = runtimeProbes.find((entry) => entry.context.hasWx && entry.context.role === 'appservice')
-      ?? runtimeProbes.find((entry) => entry.runtime?.hasWxRequest)
-      ?? runtimeProbes.find((entry) => entry.context.hasWx);
-    fetchCandidate = runtimeProbes.find((entry) => entry.runtime?.hasFetch);
+
+    const probeResult = await attempt('wxmp_probe_contexts', { session_id: sessionId }, 45_000);
+    if (!probeResult.ok) {
+      const code = toolErrorCode(probeResult);
+      contextAttempts.push({
+        observedAt: new Date().toISOString(),
+        reason: 'probe-failed',
+        code,
+        details: probeResult.details,
+        remainingMs: leftoverMs,
+      });
+      if (code === 'RUNTIME_NOT_CONNECTED' || code === 'SESSION_DISCONNECTED') {
+        const waitMs = Math.min(runtimeWaitTimeoutMs, remainingMs(contextDeadline));
+        if (waitMs >= 1) {
+          const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: waitMs }, waitMs + 10_000);
+          if (waited.ok) attached = waited.data;
+          continue;
+        }
+      }
+      if (Date.now() >= contextDeadline) break;
+      await sleep(Math.min(1500, remainingMs(contextDeadline)));
+      continue;
+    }
+
+    probed = probeResult.data;
+    runtimeProbes = [];
+    for (const context of probed.contexts ?? []) {
+      runtimeProbes.push({
+        context,
+        runtime: context.active === false ? null : await probeRuntimeContext(context.id),
+      });
+    }
+    const liveProbes = runtimeProbes.filter((entry) => entry.context.active !== false);
+    appCandidate = liveProbes.find((entry) => entry.context.hasWx && entry.context.role === 'appservice')
+      ?? liveProbes.find((entry) => entry.runtime?.hasWxRequest)
+      ?? liveProbes.find((entry) => entry.context.hasWx);
+    fetchCandidate = liveProbes.find((entry) => entry.runtime?.hasFetch);
     contextAttempts.push({
       observedAt: new Date().toISOString(),
       selectedContextId: probed.selectedContextId,
+      liveContextCount: liveProbes.length,
       contexts: runtimeProbes.map((entry) => ({
         id: entry.context.id,
         role: entry.context.role,
+        active: entry.context.active,
         hasWx: entry.context.hasWx,
         hasWxRequest: entry.runtime?.hasWxRequest,
         wxRuntimePath: entry.runtime?.wxRuntimePath,
       })),
+      remainingMs: remainingMs(contextDeadline),
     });
-    if (appCandidate || Date.now() >= contextDeadline) break;
-    await sleep(1500);
-  } while (true);
+    if (appCandidate) break;
+    process.stdout.write(`[gate] appserviceContext: WAITING ${JSON.stringify({
+      reason: liveProbes.length ? 'no-appservice-yet' : 'empty-contexts',
+      liveContextCount: liveProbes.length,
+      remainingMs: remainingMs(contextDeadline),
+    })}\n`);
+    if (Date.now() >= contextDeadline) break;
+    await sleep(Math.min(1500, remainingMs(contextDeadline)));
+  }
   summary.runtime.contexts = runtimeProbes.map((entry) => ({
     context: {
       id: entry.context.id,
@@ -469,6 +536,7 @@ try {
       hasWxRequest: entry.context.hasWxRequest,
       wxRuntimePath: entry.context.wxRuntimePath,
       capabilities: entry.context.capabilities,
+      active: entry.context.active,
     },
     runtime: {
       hasWx: entry.runtime?.hasWx,
@@ -484,19 +552,21 @@ try {
   appContextId = appCandidate?.context.id ?? '';
   fetchContextId = fetchCandidate?.context.id ?? '';
   record('appserviceContext', Boolean(appContextId), {
-    selectedContextId: probed.selectedContextId,
+    selectedContextId: probed?.selectedContextId ?? '',
     appContextId,
     fetchContextId,
+    attemptCount: contextAttempts.length,
     contexts: runtimeProbes.map((entry) => ({
       id: entry.context.id,
       role: entry.context.role,
+      active: entry.context.active,
       hasWx: entry.context.hasWx,
       hasFetch: entry.runtime?.hasFetch,
       hasXHR: entry.runtime?.hasXHR,
       wxRuntimePath: entry.runtime?.wxRuntimePath,
     })),
   });
-  if (!appContextId) throw new Error('No wx/AppService context was found');
+  if (!appContextId) throw new Error(`No wx/AppService context was found after ${contextAttempts.length} probe attempts`);
   await call('wxmp_select_context', { session_id: sessionId, context_id: appContextId });
 
   const evaluation = await call('wxmp_evaluate', {

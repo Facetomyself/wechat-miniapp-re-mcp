@@ -544,6 +544,7 @@ runner 固定强制使用 `WXMP_TOOLSET=expert`，执行 Profile/AOB、attach/br
 | [`docs/plan.md`](docs/plan.md) | 初始交付计划与 locked decisions，主体阶段已完成 |
 | [`docs/original-plan.md`](docs/original-plan.md) | 初始 `/plan` 会话产物，保留历史决策背景 |
 | [`docs/lessons-learned.md`](docs/lessons-learned.md) | 已知行为、运行时坑点和经验 |
+| [`docs/reviews/2026-08-23-wmpf20079-unattended-runtime/report.md`](docs/reviews/2026-08-23-wmpf20079-unattended-runtime/report.md) | v0.5.2 无干预内核与 WMPF 20079 live-gate 暂停分析 |
 | [`docs/deep-analysis-and-research-report.md`](docs/deep-analysis-and-research-report.md) | 2026-07-15 历史研究快照，当前状态以 progress/roadmap 为准 |
 | [`AGENTS.md`](AGENTS.md) | 仓库边界、架构约束、开发和 Git 规则 |
 

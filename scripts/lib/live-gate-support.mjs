@@ -202,7 +202,7 @@ Options:
   --profile-path <path>              Use an explicit reviewed profile.
   --connect-timeout-ms <number>      Initial wxmp_open / bridge wait (default: 60000).
   --runtime-wait-timeout-ms <number> Additional parked-session wait (default: 60000).
-  --context-timeout-ms <number>      AppService discovery window (default: 20000).
+  --context-timeout-ms <number>      AppService discovery window (default: 60000).
   --reconnect-timeout-ms <number>    Same-session reconnect wait (default: 60000).
   --skip-reconnect                   Run a reduced gate; cannot establish full-semantic acceptance.
   --node <path>                      Node executable used to start the MCP server.

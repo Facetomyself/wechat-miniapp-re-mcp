@@ -193,11 +193,16 @@ M7 live runner:
   historical RVAs.
 - A parked session or bridge timeout is `runtimeBridge` failed, not attach
   success. Failure evidence is still exported.
-- 2026-08-23 WMPF 20079 live run (`live-verification-m7`): health/profile/AOB/
-  Frida hookAttach/detach/evidenceExport passed; `runtimeBridge` failed after
-  60s because `127.0.0.1:9421` never accepted a WMPF owner. Full-semantic
-  remains runtime-pending until the target mini-program is foregrounded or
-  reloaded once.
+- 2026-08-23 WMPF 20079 live campaign (`live-verification-m7`) is paused.
+  Health/profile/AOB/Frida hookAttach/detach/evidenceExport passed on every
+  completed attach. One run (`wxmp-1a4846a1`) accepted 9421 and enabled
+  CDP Debugger/Network; AppService selection failed because no WMPF
+  `addJsContext` populated `session.contexts`. Other runs missed LoadStart
+  (`loadStartEntered=0`) when the mini-program was not closed and reopened
+  after Frida `ready`. Full-semantic remains runtime-pending.
+- Irreducible human step is unchanged: PC WeChat running, then one explicit
+  post-inject close/reopen of the target mini-program. `forceDebugTrigger`
+  stays observation-only.
 
 ## 6. Architecture seams
 

@@ -22,6 +22,7 @@ test('live semantic gate dry-run resolves an expert versioned execution plan', (
     outputPath: string;
     connectTimeoutMs: number;
     runtimeWaitTimeoutMs: number;
+    contextTimeoutMs: number;
   };
   assert.equal(output.ok, true);
   assert.equal(output.dryRun, true);
@@ -29,6 +30,7 @@ test('live semantic gate dry-run resolves an expert versioned execution plan', (
   assert.equal(output.expectedWmpfVersion, 20079);
   assert.equal(output.connectTimeoutMs, 60_000);
   assert.equal(output.runtimeWaitTimeoutMs, 60_000);
+  assert.equal(output.contextTimeoutMs, 60_000);
   assert.deepEqual(output.requiredGates, gateContract.liveRunnerRequired.filter((gateName) => gateName !== 'reconnect'));
   assert.match(output.outputPath, /live-semantic-gate-v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?-wmpf20079-/);
 });
@@ -53,6 +55,7 @@ test('live semantic gate help is available without a built server or WMPF target
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /--wmpf-version/);
   assert.match(result.stdout, /--skip-reconnect/);
+  assert.match(result.stdout, /--context-timeout-ms <number>\s+AppService discovery window \(default: 60000\)/);
 });
 
 function run(args: string[]): { status: number | null; stdout: string; stderr: string } {
