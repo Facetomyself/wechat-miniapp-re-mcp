@@ -1,10 +1,16 @@
+import { existsSync, promises as fs } from 'node:fs';
+import path from 'node:path';
 import { WxmpApp } from '../app.js';
 import { WxmpError } from '../errors.js';
 import { buildWxRequestHookSource } from '../runtime/wx-request-hook.js';
+import { attestedPromote, prepareCandidateProfile, workspaceReviewedProfilePath } from '../runtime/profile-adapt.js';
 import { buildWxAppSnapshotExpression } from '../runtime/wx-runtime.js';
 import { extractRemoteValue } from '../transport/cdp-channel.js';
 import { TargetProcess } from '../types.js';
 import { WxmpSession } from '../sessions/manager.js';
+import { isParkedState, resolveRuntimeWaitMs } from '../sessions/machine.js';
+import { IndexedHit } from '../static/index-v2.js';
+import { correlateRuntimeStatic } from './correlate.js';
 
 export interface OpenWorkflowOptions {
   sessionId?: string;
@@ -29,7 +35,8 @@ export class AgentWorkflow {
     const profiles: Array<Record<string, unknown>> = [];
     for (const target of targets.filter((item) => item.version)) {
       try {
-        const loaded = await this.app.sessions.profileManager().load(target.version!);
+        const inferredProject = target.appId || `wxmp-${target.pid}`;
+        const loaded = await this.loadProfilePreferringWorkspace(target.version!, inferredProject);
         const probe = await this.app.sessions.profileManager().probe(target, loaded.profile);
         let injectable = true;
         let injectionBlock: string | undefined;
@@ -53,18 +60,23 @@ export class AgentWorkflow {
     }
     const targetReady = targets.length > 0;
     const profileReady = profiles.some((profile) => profile.injectable === true && (profile.probe as Record<string, unknown> | undefined)?.valid === true);
-    const profileAction = 'Generate and review a hash-bound Profile for the detected WMPF version, install it in a configured profile directory, then rerun wxmp_doctor.';
-    const state = !targetReady ? 'needs_user_action' : profileReady ? 'ready_to_open' : 'degraded';
+    const extractor = this.app.extractor.info();
+    const canAdapt = extractor.available;
+    const profileAction = canAdapt
+      ? 'No injectable Profile is installed. wxmp_open will copy flue.dll, run wmpf-offset-adaptation, smoke-attest Frida hooks, and promote a medium Profile.'
+      : `Install the offset extractor, then retry. python="${extractor.pythonPath ?? ''}" script="${extractor.scriptPath ?? ''}".`;
+    const state = !targetReady ? 'needs_user_action' : profileReady || canAdapt ? 'ready_to_open' : 'degraded';
     return {
       state,
       retryable: !targetReady,
-      needsUserAction: !targetReady || !profileReady,
+      needsUserAction: !targetReady || (!profileReady && !canAdapt),
       missingCapability: !targetReady ? 'wmpfTarget' : !profileReady ? 'runtimeProfile' : undefined,
       userAction: !targetReady ? 'Open or foreground the target mini-program in PC WeChat.' : !profileReady ? profileAction : undefined,
-      nextActions: targetReady && profileReady ? ['wxmp_open'] : ['wxmp_doctor'],
+      nextActions: targetReady && (profileReady || canAdapt) ? ['wxmp_open'] : ['wxmp_doctor'],
       targetCount: targets.length,
       targets,
       profiles,
+      extractor,
       discoveryError,
       bridge: this.app.sessions.bridge.info(),
       staticAdapter: this.app.staticAdapter.info(),
@@ -98,18 +110,24 @@ export class AgentWorkflow {
       ));
       if (!session) {
         const inferredProject = selectedTarget.appId || `wxmp-${selectedTarget.pid}`;
+        const projectName = options.projectName?.trim() || inferredProject;
+        const resolved = await this.resolveOpenProfile(selectedTarget, projectName, options.profilePath);
         session = await this.app.sessions.attach({
           pid: selectedTarget.pid,
-          projectName: options.projectName?.trim() || inferredProject,
-          profilePath: options.profilePath,
-          connectTimeoutMs: options.connectTimeoutMs ?? 5000,
+          projectName,
+          profilePath: resolved.profilePath,
+          connectTimeoutMs: resolveRuntimeWaitMs(options.connectTimeoutMs),
+          allowCandidateSmoke: resolved.allowCandidateSmoke,
         });
+        if (resolved.allowCandidateSmoke && resolved.prepared) {
+          await this.promoteSmokeAttested(session, resolved.prepared);
+        }
         attachedThisCall = true;
       }
     }
 
-    if (!attachedThisCall && ['waiting_for_runtime', 'disconnected'].includes(session.state)) {
-      await this.app.sessions.waitForRuntime(session.id, options.connectTimeoutMs ?? 5000);
+    if (!attachedThisCall && isParkedState(session.state)) {
+      await this.app.sessions.waitForRuntime(session.id, resolveRuntimeWaitMs(options.connectTimeoutMs));
     }
     if (session.state !== 'connected' || !this.app.sessions.bridge.isConnected(session.id)) {
       return {
@@ -258,6 +276,123 @@ export class AgentWorkflow {
     return { sessionId, state: 'closed', status, evidence };
   }
 
+  async correlate(sessionId: string, options: { sourceRoot?: string; appId?: string } = {}): Promise<Record<string, unknown>> {
+    const session = this.app.sessions.get(sessionId);
+    const appId = options.appId?.trim() || session.target.appId || null;
+    let packages: Array<{ appId: string; path: string }> = [];
+    try {
+      packages = (await this.app.staticAdapter.scan([], 500)).map((item) => ({ appId: item.appId, path: item.path }));
+    } catch (error) {
+      packages = [];
+      await session.evidence.append('agent.correlate_package_scan_gap', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    let index: Parameters<typeof correlateRuntimeStatic>[0]['index'] = null;
+    if (options.sourceRoot) {
+      const built = await this.app.staticAdapter.buildIndex(options.sourceRoot, session.projectName);
+      index = {
+        root: String(built.root),
+        urls: Array.isArray(built.urls) ? built.urls as string[] : [],
+        routes: Array.isArray(built.routes) ? built.routes as string[] : [],
+        files: Array.isArray(built.files) ? built.files as string[] : [],
+        urlHits: Array.isArray(built.urlHits) ? built.urlHits as IndexedHit[] : undefined,
+        routeHits: Array.isArray(built.routeHits) ? built.routeHits as IndexedHit[] : undefined,
+        pages: Array.isArray((built.manifest as { pages?: IndexedHit[] } | undefined)?.pages)
+          ? (built.manifest as { pages: IndexedHit[] }).pages
+          : undefined,
+        kind: typeof built.kind === 'string' ? built.kind : undefined,
+      };
+    }
+    const correlated = correlateRuntimeStatic({
+      appId,
+      scripts: [...session.channel.scripts.values()].map((script) => ({ scriptId: script.scriptId, url: script.url })),
+      requests: [...session.channel.requests.values()].map((request) => ({
+        requestId: request.requestId,
+        url: request.url,
+        initiator: request.initiator,
+        hookCallStack: request.transportOptions?.callStack,
+      })),
+      packages,
+      index,
+    });
+    await session.evidence.append('agent.correlate', correlated, { operation: 'wxmp_correlate' });
+    return { sessionId, appId, sourceRoot: options.sourceRoot ?? null, ...correlated };
+  }
+
+  private async resolveOpenProfile(
+    target: TargetProcess,
+    projectName: string,
+    explicitPath?: string,
+  ): Promise<{
+    profilePath?: string;
+    allowCandidateSmoke: boolean;
+    prepared?: Awaited<ReturnType<typeof prepareCandidateProfile>>;
+  }> {
+    const profiles = this.app.sessions.profileManager();
+    try {
+      const loaded = await this.loadProfilePreferringWorkspace(target.version ?? 0, projectName, explicitPath);
+      profiles.assertInjectable(loaded.profile);
+      return { profilePath: loaded.path, allowCandidateSmoke: false };
+    } catch (error) {
+      if (explicitPath) throw error;
+      if (!(error instanceof WxmpError) || !['PROFILE_NOT_FOUND', 'PROFILE_REVIEW_REQUIRED'].includes(error.code)) {
+        throw error;
+      }
+      if (target.version) {
+        const reviewedPath = workspaceReviewedProfilePath(this.app.config.workspaceRoot, projectName, target.version);
+        if (existsSync(reviewedPath)) {
+          const reviewed = await profiles.load(target.version, reviewedPath);
+          profiles.assertInjectable(reviewed.profile);
+          return { profilePath: reviewed.path, allowCandidateSmoke: false };
+        }
+      }
+      const prepared = await prepareCandidateProfile({
+        target,
+        projectName,
+        extractor: this.app.extractor,
+        profiles,
+        workspaceRoot: this.app.config.workspaceRoot,
+      });
+      return { profilePath: prepared.candidatePath, allowCandidateSmoke: true, prepared };
+    }
+  }
+
+  private async loadProfilePreferringWorkspace(version: number, projectName: string, explicitPath?: string) {
+    const profiles = this.app.sessions.profileManager();
+    try {
+      return await profiles.load(version, explicitPath);
+    } catch (error) {
+      if (explicitPath || !version) throw error;
+      if (!(error instanceof WxmpError) || error.code !== 'PROFILE_NOT_FOUND') throw error;
+      const reviewedPath = workspaceReviewedProfilePath(this.app.config.workspaceRoot, projectName, version);
+      if (!existsSync(reviewedPath)) throw error;
+      return profiles.load(version, reviewedPath);
+    }
+  }
+
+  private async promoteSmokeAttested(
+    session: WxmpSession,
+    prepared: Awaited<ReturnType<typeof prepareCandidateProfile>>,
+  ): Promise<void> {
+    const smoke = await session.frida?.status() ?? {};
+    const promoted = attestedPromote({
+      candidate: prepared.candidate,
+      hashValidated: prepared.probe.hashValidated === true,
+      boundsValid: prepared.probe.valid === true,
+      moduleSha256: prepared.archived.sha256,
+      aob: prepared.aob,
+      extractor: prepared.extractorEvidence,
+      smoke,
+    });
+    const outputPath = workspaceReviewedProfilePath(this.app.config.workspaceRoot, session.projectName, promoted.wmpfVersion);
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs.writeFile(outputPath, `${JSON.stringify(promoted, null, 2)}\n`, 'utf8');
+    session.profile = promoted;
+    session.profilePath = outputPath;
+    await session.evidence.append('profile.smoke_promoted', { outputPath, provenance: promoted.provenance, review: promoted.review });
+  }
+
   private async ensureRequestHook(session: WxmpSession, requestedContextId?: string): Promise<Record<string, unknown>> {
     const contextId = requestedContextId || session.selectedContextId;
     if (!contextId) return { active: false, missingCapability: 'appContext', reason: 'No selected WMPF context.' };
@@ -295,7 +430,7 @@ function checkedRuntimeValue(response: Record<string, unknown>, operation: strin
 }
 
 function workflowState(session: WxmpSession): Record<string, unknown> {
-  if (['waiting_for_runtime', 'disconnected'].includes(session.state)) {
+  if (isParkedState(session.state)) {
     return {
       state: 'needs_user_action',
       retryable: true,
@@ -312,7 +447,7 @@ function workflowState(session: WxmpSession): Record<string, unknown> {
       state: 'ready',
       retryable: false,
       needsUserAction: false,
-      nextActions: ['wxmp_app_snapshot', 'wxmp_observe_window', 'wxmp_get_api_inventory'],
+      nextActions: ['wxmp_evaluate', 'wxmp_app_snapshot', 'wxmp_list_scripts', 'wxmp_get_api_inventory', 'wxmp_correlate'],
     };
   }
   if (session.state === 'connected') {

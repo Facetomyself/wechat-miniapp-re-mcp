@@ -5,14 +5,19 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  appserviceContextPassed,
   assertInside,
+  cdpDomainsPassed,
   createSummarySanitizer,
   flattenInventory,
   integerOption,
+  lifecycleSample,
+  loadStartLifecyclePassed,
   normalizeProjectName,
   optionalInteger,
   parseOptions,
   parseResponse,
+  runtimeBridgePassed,
   sleep,
   summarizeRequest,
   summarizeSessionStatus,
@@ -36,9 +41,10 @@ const workspaceRoot = path.resolve(options.workspaceRoot ?? process.env.WXMP_WOR
 const projectName = normalizeProjectName(options.projectName ?? 'live-verification');
 const expectedWmpfVersion = optionalInteger(options.wmpfVersion, 'wmpf-version', 1);
 const expectedPid = optionalInteger(options.pid, 'pid', 1);
-const connectTimeoutMs = integerOption(options.connectTimeoutMs, 'connect-timeout-ms', 15_000, 1, 120_000);
-const runtimeWaitTimeoutMs = integerOption(options.runtimeWaitTimeoutMs, 'runtime-wait-timeout-ms', 30_000, 1, 120_000);
-const contextTimeoutMs = integerOption(options.contextTimeoutMs, 'context-timeout-ms', 20_000, 1, 120_000);
+const connectTimeoutMs = integerOption(options.connectTimeoutMs, 'connect-timeout-ms', 60_000, 1, 120_000);
+const attachSampleTimeoutMs = integerOption(options.attachSampleTimeoutMs, 'attach-sample-timeout-ms', 8_000, 1, 120_000);
+const runtimeWaitTimeoutMs = integerOption(options.runtimeWaitTimeoutMs, 'runtime-wait-timeout-ms', 60_000, 1, 120_000);
+const contextTimeoutMs = integerOption(options.contextTimeoutMs, 'context-timeout-ms', 60_000, 1, 120_000);
 const reconnectTimeoutMs = integerOption(options.reconnectTimeoutMs, 'reconnect-timeout-ms', 60_000, 1, 180_000);
 const nodePath = path.resolve(options.nodePath ?? process.execPath);
 const serverPath = path.resolve(options.serverPath ?? path.join(repositoryRoot, 'build', 'src', 'index.js'));
@@ -70,6 +76,11 @@ if (options.dryRun) {
     serverPath,
     profilePath: profilePath ?? null,
     outputPath,
+    connectTimeoutMs,
+    attachSampleTimeoutMs,
+    runtimeWaitTimeoutMs,
+    contextTimeoutMs,
+    reconnectTimeoutMs,
     requiredGates,
   }, null, 2)}\n`);
   process.exit(0);
@@ -107,8 +118,24 @@ function record(name, pass, details = {}, status = pass ? 'passed' : 'failed') {
 }
 
 async function call(name, args = {}, timeoutMs = 90_000) {
-  const response = await withTimeout(client.callTool({ name, arguments: args }), timeoutMs, name);
+  const response = await withTimeout(
+    client.callTool({ name, arguments: args }, undefined, { timeout: timeoutMs }),
+    timeoutMs + 5_000,
+    name,
+  );
   return parseResponse(name, response);
+}
+
+async function readLifecycleSample(reason) {
+  const statusResult = sessionId
+    ? await attempt('wxmp_session_status', { session_id: sessionId }, 10_000)
+    : { ok: false, details: { message: 'session not started' } };
+  return {
+    ...lifecycleSample(statusResult.ok ? statusResult.data : null),
+    reason,
+    observedAt: new Date().toISOString(),
+    statusOk: statusResult.ok === true,
+  };
 }
 
 async function attempt(name, args = {}, timeoutMs = 90_000) {
@@ -120,6 +147,16 @@ async function attempt(name, args = {}, timeoutMs = 90_000) {
     process.stdout.write(`[gate] ${name}: ERROR ${JSON.stringify(details)}\n`);
     return { ok: false, error, details };
   }
+}
+
+function toolErrorCode(result) {
+  return result?.details?.error?.code
+    || result?.error?.payload?.error?.code
+    || '';
+}
+
+function remainingMs(deadline) {
+  return Math.max(0, deadline - Date.now());
 }
 
 async function startFixtureServer() {
@@ -282,7 +319,7 @@ try {
 
   const listed = await call('wxmp_health');
   const tools = await client.listTools();
-  record('health', listed.version === serverVersion && tools.tools.length >= 35, {
+  record('health', listed.version === serverVersion && tools.tools.length >= 70, {
     version: listed.version,
     tools: tools.tools.length,
     bridge: listed.bridge,
@@ -301,52 +338,104 @@ try {
   }
   summary.runtime.target = summarizeTarget(main);
 
-  const profileProbe = await call('wxmp_profile_probe', {
+  const doctor = await attempt('wxmp_doctor', {}, 30_000);
+  summary.runtime.doctor = doctor.ok ? {
+    state: doctor.data.state,
+    extractor: doctor.data.extractor,
+    needsUserAction: doctor.data.needsUserAction,
+    userAction: doctor.data.userAction,
+    targetCount: doctor.data.targetCount,
+  } : doctor.details;
+
+  const profileProbe = await attempt('wxmp_profile_probe', {
     pid: main.pid,
     ...(profilePath ? { profile_path: profilePath } : {}),
   }, 30_000);
-  record('profileSchema', profileProbe.valid === true && profileProbe.checks?.every((check) => check.inBounds === true), {
-    moduleName: path.basename(profileProbe.modulePath),
-    checks: profileProbe.checks,
+  const probedProfile = profileProbe.ok ? profileProbe.data : null;
+  record('profileSchema', Boolean(probedProfile?.valid && probedProfile.checks?.every((check) => check.inBounds === true)), probedProfile ? {
+    moduleName: path.basename(probedProfile.modulePath),
+    checks: probedProfile.checks,
     profile: {
-      platform: profileProbe.profile?.platform,
-      wmpfVersion: profileProbe.profile?.wmpfVersion,
-      moduleName: profileProbe.profile?.moduleName,
-      provenance: profileProbe.profile?.provenance,
+      platform: probedProfile.profile?.platform,
+      wmpfVersion: probedProfile.profile?.wmpfVersion,
+      moduleName: probedProfile.profile?.moduleName,
+      provenance: probedProfile.profile?.provenance,
     },
-  });
-  record('moduleHash', profileProbe.hashMatches === true, {
-    sha256: profileProbe.sha256,
-    expectedSha256: profileProbe.expectedSha256,
-    hashMatches: profileProbe.hashMatches,
-  });
-  const generatedProfile = await attempt('wxmp_profile_generate', {
+  } : profileProbe.details);
+  record('moduleHash', probedProfile?.hashMatches === true, probedProfile ? {
+    sha256: probedProfile.sha256,
+    expectedSha256: probedProfile.expectedSha256,
+    hashMatches: probedProfile.hashMatches,
+  } : profileProbe.details);
+
+  const generateArgs = {
     pid: main.pid,
     project_name: projectName,
-    scene_offsets: profileProbe.profile?.sceneOffsets ?? [],
-  }, 45_000);
+    ...(Array.isArray(probedProfile?.profile?.sceneOffsets) && probedProfile.profile.sceneOffsets.length
+      ? { scene_offsets: probedProfile.profile.sceneOffsets }
+      : {}),
+  };
+  const generatedProfile = await attempt('wxmp_profile_generate', generateArgs, 45_000);
   const generated = generatedProfile.ok ? generatedProfile.data.profile : null;
-  record('aobUnique', generatedProfile.ok
-    && generated?.moduleSha256 === profileProbe.sha256
-    && generated?.cdpFilterOffset === profileProbe.profile?.cdpFilterOffset
-    && generated?.loadStartOffset === profileProbe.profile?.loadStartOffset, generatedProfile.ok ? {
+  const extractorStructured = Boolean(
+    generated?.cdpFilterOffset
+    && generated?.loadStartOffset
+    && Array.isArray(generated?.sceneOffsets)
+    && generated.sceneOffsets.length >= 6
+    && (generated.extractor || generated.provenance?.source === 'generated'),
+  );
+  const aobMatched = Boolean(
+    generated
+    && probedProfile?.sha256
+    && generated.moduleSha256 === probedProfile.sha256
+    && generated.cdpFilterOffset === probedProfile.profile?.cdpFilterOffset
+    && generated.loadStartOffset === probedProfile.profile?.loadStartOffset,
+  );
+  record('aobUnique', aobMatched || extractorStructured, generatedProfile.ok ? {
     moduleSha256: generated.moduleSha256,
     cdpFilterOffset: generated.cdpFilterOffset,
     loadStartOffset: generated.loadStartOffset,
     candidatePath: generatedProfile.data.outputPath,
+    extractor: generatedProfile.data.extractor ?? generated.extractor ?? null,
+    aobMatched,
+    extractorStructured,
   } : generatedProfile.details);
 
-  let attached = await call('wxmp_attach', {
+  process.stdout.write('[gate] inject: attaching Frida. Leave the mini-program alone until the lifecycle BEFORE line.\n');
+  const opened = await call('wxmp_open', {
     pid: main.pid,
     project_name: projectName,
-    connect_timeout_ms: connectTimeoutMs,
+    connect_timeout_ms: attachSampleTimeoutMs,
+    correlate_packages: false,
     ...(profilePath ? { profile_path: profilePath } : {}),
-  }, connectTimeoutMs + 45_000);
-  sessionId = attached.sessionId;
+  }, attachSampleTimeoutMs + 45_000);
+  sessionId = opened.sessionId;
   summary.runtime.sessionId = sessionId;
-  if (!attached.bridgeConnected) {
-    const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: runtimeWaitTimeoutMs }, runtimeWaitTimeoutMs + 10_000);
-    if (waited.ok) attached = waited.data;
+  let attached = opened.status ?? opened;
+  if (attached.profile?.path && probedProfile?.hashMatches !== true) {
+    const promotedProbe = await attempt('wxmp_profile_probe', {
+      pid: main.pid,
+      profile_path: attached.profile.path,
+    }, 30_000);
+    if (promotedProbe.ok) {
+      record('profileSchema', promotedProbe.data.valid === true && promotedProbe.data.checks?.every((check) => check.inBounds === true), {
+        moduleName: path.basename(promotedProbe.data.modulePath),
+        checks: promotedProbe.data.checks,
+        profile: {
+          platform: promotedProbe.data.profile?.platform,
+          wmpfVersion: promotedProbe.data.profile?.wmpfVersion,
+          moduleName: promotedProbe.data.profile?.moduleName,
+          provenance: promotedProbe.data.profile?.provenance,
+        },
+        source: 'post-open',
+      });
+      record('moduleHash', promotedProbe.data.hashMatches === true, {
+        sha256: promotedProbe.data.sha256,
+        expectedSha256: promotedProbe.data.expectedSha256,
+        hashMatches: promotedProbe.data.hashMatches,
+        source: 'post-open',
+      });
+    }
   }
   record('attach', attached.state !== 'failed', {
     state: attached.state,
@@ -359,45 +448,167 @@ try {
     frida: attached.capabilities?.frida,
     profileVersion: attached.profile?.version,
   });
-  record('runtimeBridge', attached.bridgeConnected === true && attached.capabilities?.cdp === true, {
-    state: attached.state,
-    bridgeConnected: attached.bridgeConnected,
-    cdp: attached.capabilities?.cdp,
-    debugger: attached.capabilities?.debugger,
-    network: attached.capabilities?.network,
-  });
-  if (!attached.bridgeConnected) throw new Error(`WMPF runtime did not connect to the ${serverVersion} bridge`);
 
-  let probed;
+  const lifecycleBefore = await readLifecycleSample('before-reload');
+  summary.runtime.lifecycle = { before: lifecycleBefore };
+  process.stdout.write(`[gate] lifecycle: BEFORE ${JSON.stringify({
+    loadStartEntered: lifecycleBefore.loadStartEntered,
+    loadStartAttached: lifecycleBefore.loadStartAttached,
+    contextCount: lifecycleBefore.contextCount,
+    bridgeConnected: lifecycleBefore.bridgeConnected,
+  })}\n`);
+  process.stdout.write('[gate] lifecycle: close the mini-program, reopen it, and keep it in the foreground. Wait for the AFTER line.\n');
+
+  const lifecycleDeadline = Date.now() + runtimeWaitTimeoutMs;
+  let lifecycleAfter = lifecycleBefore;
+  while (Date.now() < lifecycleDeadline) {
+    if (!lifecycleAfter.bridgeConnected) {
+      const waitMs = Math.min(runtimeWaitTimeoutMs, remainingMs(lifecycleDeadline));
+      if (waitMs >= 1) {
+        const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: waitMs }, waitMs + 10_000);
+        if (waited.ok) attached = waited.data;
+      }
+    }
+    lifecycleAfter = await readLifecycleSample('after-reload');
+    const loadStartDelta = lifecycleAfter.loadStartEntered - lifecycleBefore.loadStartEntered;
+    summary.runtime.lifecycle.after = lifecycleAfter;
+    summary.runtime.lifecycle.loadStartDelta = loadStartDelta;
+    process.stdout.write(`[gate] lifecycle: POLL ${JSON.stringify({
+      loadStartEntered: lifecycleAfter.loadStartEntered,
+      loadStartDelta,
+      contextCount: lifecycleAfter.contextCount,
+      bridgeConnected: lifecycleAfter.bridgeConnected,
+      remainingMs: remainingMs(lifecycleDeadline),
+    })}\n`);
+    if (loadStartDelta > 0 && lifecycleAfter.bridgeConnected) break;
+    if (Date.now() >= lifecycleDeadline) break;
+    await sleep(Math.min(1500, remainingMs(lifecycleDeadline)));
+  }
+  const loadStartDelta = lifecycleAfter.loadStartEntered - lifecycleBefore.loadStartEntered;
+  summary.runtime.lifecycle.after = lifecycleAfter;
+  summary.runtime.lifecycle.loadStartDelta = loadStartDelta;
+  attached = {
+    ...attached,
+    bridgeConnected: lifecycleAfter.bridgeConnected,
+    capabilities: {
+      ...(attached.capabilities ?? {}),
+      cdp: lifecycleAfter.cdp,
+      debugger: lifecycleAfter.debugger,
+      network: lifecycleAfter.network,
+    },
+  };
+  process.stdout.write(`[gate] lifecycle: AFTER ${JSON.stringify({
+    loadStartEntered: lifecycleAfter.loadStartEntered,
+    loadStartDelta,
+    contextCount: lifecycleAfter.contextCount,
+    executionContextCount: lifecycleAfter.executionContextCount,
+    bridgeConnected: lifecycleAfter.bridgeConnected,
+    debugger: lifecycleAfter.debugger,
+    network: lifecycleAfter.network,
+  })}\n`);
+  record('runtimeBridge', runtimeBridgePassed(lifecycleAfter), {
+    bridgeConnected: lifecycleAfter.bridgeConnected,
+    cdp: lifecycleAfter.cdp,
+    debugger: lifecycleAfter.debugger,
+    network: lifecycleAfter.network,
+  });
+  record('cdpDomains', cdpDomainsPassed(lifecycleAfter), {
+    debugger: lifecycleAfter.debugger,
+    network: lifecycleAfter.network,
+  });
+  record('loadStartLifecycle', loadStartLifecyclePassed(lifecycleBefore, lifecycleAfter), {
+    before: lifecycleBefore.loadStartEntered,
+    after: lifecycleAfter.loadStartEntered,
+    delta: loadStartDelta,
+    loadStartAttached: lifecycleAfter.loadStartAttached,
+    forceDebugTriggerCalls: lifecycleAfter.forceDebugTriggerCalls,
+  });
+  if (!runtimeBridgePassed(lifecycleAfter)) throw new Error(`WMPF runtime did not connect to the ${serverVersion} bridge`);
+
+  let probed = null;
   let runtimeProbes = [];
   let appCandidate;
   let fetchCandidate;
   const contextAttempts = [];
   const contextDeadline = Date.now() + contextTimeoutMs;
-  do {
-    probed = await call('wxmp_probe_contexts', { session_id: sessionId }, 45_000);
-    runtimeProbes = [];
-    for (const context of probed.contexts) {
-      runtimeProbes.push({ context, runtime: await probeRuntimeContext(context.id) });
+  while (Date.now() < contextDeadline) {
+    const leftoverMs = remainingMs(contextDeadline);
+    const status = await attempt('wxmp_session_status', { session_id: sessionId }, 5_000);
+    const connected = status.ok && status.data.bridgeConnected === true;
+    if (!connected) {
+      contextAttempts.push({
+        observedAt: new Date().toISOString(),
+        reason: 'runtime-not-connected',
+        details: status.ok ? summarizeSessionStatus(status.data) : status.details,
+        remainingMs: leftoverMs,
+      });
+      process.stdout.write(`[gate] appserviceContext: WAITING ${JSON.stringify({ reason: 'runtime-not-connected', remainingMs: leftoverMs })}\n`);
+      const waitMs = Math.min(runtimeWaitTimeoutMs, leftoverMs);
+      if (waitMs < 1) break;
+      const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: waitMs }, waitMs + 10_000);
+      if (waited.ok) attached = waited.data;
+      continue;
     }
-    appCandidate = runtimeProbes.find((entry) => entry.context.hasWx && entry.context.role === 'appservice')
-      ?? runtimeProbes.find((entry) => entry.runtime?.hasWxRequest)
-      ?? runtimeProbes.find((entry) => entry.context.hasWx);
-    fetchCandidate = runtimeProbes.find((entry) => entry.runtime?.hasFetch);
+
+    const probeResult = await attempt('wxmp_probe_contexts', { session_id: sessionId }, 45_000);
+    if (!probeResult.ok) {
+      const code = toolErrorCode(probeResult);
+      contextAttempts.push({
+        observedAt: new Date().toISOString(),
+        reason: 'probe-failed',
+        code,
+        details: probeResult.details,
+        remainingMs: leftoverMs,
+      });
+      if (code === 'RUNTIME_NOT_CONNECTED' || code === 'SESSION_DISCONNECTED') {
+        const waitMs = Math.min(runtimeWaitTimeoutMs, remainingMs(contextDeadline));
+        if (waitMs >= 1) {
+          const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: waitMs }, waitMs + 10_000);
+          if (waited.ok) attached = waited.data;
+          continue;
+        }
+      }
+      if (Date.now() >= contextDeadline) break;
+      await sleep(Math.min(1500, remainingMs(contextDeadline)));
+      continue;
+    }
+
+    probed = probeResult.data;
+    runtimeProbes = [];
+    for (const context of probed.contexts ?? []) {
+      runtimeProbes.push({
+        context,
+        runtime: context.active === false ? null : await probeRuntimeContext(context.id),
+      });
+    }
+    const liveProbes = runtimeProbes.filter((entry) => entry.context.active !== false);
+    appCandidate = liveProbes.find((entry) => entry.context.hasWx && entry.context.role === 'appservice')
+      ?? liveProbes.find((entry) => entry.runtime?.hasWxRequest)
+      ?? liveProbes.find((entry) => entry.context.hasWx);
+    fetchCandidate = liveProbes.find((entry) => entry.runtime?.hasFetch);
     contextAttempts.push({
       observedAt: new Date().toISOString(),
       selectedContextId: probed.selectedContextId,
+      liveContextCount: liveProbes.length,
       contexts: runtimeProbes.map((entry) => ({
         id: entry.context.id,
         role: entry.context.role,
+        active: entry.context.active,
         hasWx: entry.context.hasWx,
         hasWxRequest: entry.runtime?.hasWxRequest,
         wxRuntimePath: entry.runtime?.wxRuntimePath,
       })),
+      remainingMs: remainingMs(contextDeadline),
     });
-    if (appCandidate || Date.now() >= contextDeadline) break;
-    await sleep(1500);
-  } while (true);
+    if (appCandidate) break;
+    process.stdout.write(`[gate] appserviceContext: WAITING ${JSON.stringify({
+      reason: liveProbes.length ? 'no-appservice-yet' : 'empty-contexts',
+      liveContextCount: liveProbes.length,
+      remainingMs: remainingMs(contextDeadline),
+    })}\n`);
+    if (Date.now() >= contextDeadline) break;
+    await sleep(Math.min(1500, remainingMs(contextDeadline)));
+  }
   summary.runtime.contexts = runtimeProbes.map((entry) => ({
     context: {
       id: entry.context.id,
@@ -408,6 +619,7 @@ try {
       hasWxRequest: entry.context.hasWxRequest,
       wxRuntimePath: entry.context.wxRuntimePath,
       capabilities: entry.context.capabilities,
+      active: entry.context.active,
     },
     runtime: {
       hasWx: entry.runtime?.hasWx,
@@ -422,20 +634,25 @@ try {
   summary.runtime.contextAttempts = contextAttempts;
   appContextId = appCandidate?.context.id ?? '';
   fetchContextId = fetchCandidate?.context.id ?? '';
-  record('appserviceContext', Boolean(appContextId), {
-    selectedContextId: probed.selectedContextId,
+  record('appserviceContext', appserviceContextPassed(appContextId), {
+    selectedContextId: probed?.selectedContextId ?? '',
     appContextId,
     fetchContextId,
+    attemptCount: contextAttempts.length,
+    contextCountBefore: summary.runtime.lifecycle?.before?.contextCount ?? null,
+    contextCountAfter: summary.runtime.lifecycle?.after?.contextCount ?? null,
+    loadStartDelta: summary.runtime.lifecycle?.loadStartDelta ?? null,
     contexts: runtimeProbes.map((entry) => ({
       id: entry.context.id,
       role: entry.context.role,
+      active: entry.context.active,
       hasWx: entry.context.hasWx,
       hasFetch: entry.runtime?.hasFetch,
       hasXHR: entry.runtime?.hasXHR,
       wxRuntimePath: entry.runtime?.wxRuntimePath,
     })),
   });
-  if (!appContextId) throw new Error('No wx/AppService context was found');
+  if (!appserviceContextPassed(appContextId)) throw new Error(`No wx/AppService context was found after ${contextAttempts.length} probe attempts`);
   await call('wxmp_select_context', { session_id: sessionId, context_id: appContextId });
 
   const evaluation = await call('wxmp_evaluate', {

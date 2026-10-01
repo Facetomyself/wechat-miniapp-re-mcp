@@ -101,6 +101,7 @@ test('StaticAdapter buildIndex extracts URLs, wx APIs, routes', async () => {
 
   const adapter = new StaticAdapter(mockConfig(root));
   const index = await adapter.buildIndex(srcDir, 'testproject');
+  assert.equal(index.schemaVersion, 2);
   assert.ok((index.urls as string[]).some((u) => u.includes('api.example.com')));
   assert.ok((index.wxApis as string[]).includes('request'));
   assert.ok((index.wxApis as string[]).includes('setStorage'));
@@ -138,6 +139,8 @@ test('StaticAdapter decompile runs a backend subprocess and closes the static an
   const search = await adapter.search(outputPath, 'fixture.example.test');
   assert.equal(search.count, 1);
   const index = await adapter.buildIndex(outputPath, 'subprocess-fixture');
+  assert.equal(index.schemaVersion, 2);
+  assert.equal(index.kind, 'main');
   assert.deepEqual(index.urls, ['https://fixture.example.test/v1/data']);
   assert.ok((index.wxApis as string[]).includes('request'));
   assert.ok((index.wxApis as string[]).includes('setStorage'));

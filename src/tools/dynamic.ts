@@ -168,12 +168,41 @@ export function buildDynamicTools(app: WxmpApp): ToolEntry[] {
         ? (response.result as Record<string, unknown>).locations as unknown[]
         : responseResult?.actualLocation ? [responseResult.actualLocation] : [];
       const pending = !scriptId && locations.length === 0;
-      await session.evidence.append('debugger.breakpoint_set', { response, boundLocations: locations.length, pending }, { contextId, operation: 'set_breakpoint' });
-      return result({ response, contextId, boundLocations: locations.length, pending });
+      const cdpBreakpointId = typeof responseResult?.breakpointId === 'string' ? responseResult.breakpointId : undefined;
+      const logical = typeof channel.registerBreakpoint === 'function'
+        ? channel.registerBreakpoint({
+          kind: scriptId ? 'script' : url ? 'url' : 'urlRegex',
+          spec: {
+            scriptId: scriptId ?? undefined,
+            url: url ?? undefined,
+            urlRegex: urlRegex ?? undefined,
+            lineNumber: int(args, 'line_number', undefined, 0),
+            columnNumber: int(args, 'column_number', 0, 0),
+            condition: optionalText(args, 'condition'),
+          },
+          cdpBreakpointId,
+          locations,
+          pending,
+          status: pending ? 'pending' : 'bound',
+        })
+        : undefined;
+      await session.evidence.append('debugger.breakpoint_set', { response, boundLocations: locations.length, pending, logicalId: logical?.logicalId }, { contextId, operation: 'set_breakpoint' });
+      return result({ response, contextId, boundLocations: locations.length, pending, logicalBreakpoint: logical ?? null });
     }),
 
-    entry('wxmp_remove_breakpoint', 'Remove a CDP breakpoint by identifier.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), breakpoint_id: stringProp('Breakpoint identifier.') }, ['session_id', 'breakpoint_id']), async (args) => {
-      const { sessionId, contextId } = sessionContext(app, args); return result(await app.sessions.get(sessionId).channel.send('Debugger.removeBreakpoint', { breakpointId: text(args, 'breakpoint_id') }, contextId));
+    entry('wxmp_remove_breakpoint', 'Remove a logical or CDP breakpoint. Stale IDs after reconnect are dropped locally without pretending the CDP id is still valid.', objectSchema({ session_id: stringProp('Session identifier.'), context_id: stringProp('Optional context.'), breakpoint_id: stringProp('Logical or CDP breakpoint identifier.') }, ['session_id', 'breakpoint_id']), async (args) => {
+      const { sessionId, contextId } = sessionContext(app, args);
+      const session = app.sessions.get(sessionId);
+      const breakpointId = text(args, 'breakpoint_id');
+      const logical = typeof session.channel.findBreakpoint === 'function' ? session.channel.findBreakpoint(breakpointId) : undefined;
+      if (logical?.status === 'stale') {
+        session.channel.removeLogicalBreakpoint?.(logical.logicalId);
+        return result({ removed: true, stale: true, cdpAttempted: false, logicalId: logical.logicalId });
+      }
+      const cdpId = logical?.cdpBreakpointId || breakpointId;
+      const response = await session.channel.send('Debugger.removeBreakpoint', { breakpointId: cdpId }, contextId);
+      session.channel.removeLogicalBreakpoint?.(logical?.logicalId || breakpointId);
+      return result({ removed: true, stale: false, cdpAttempted: true, response, logicalId: logical?.logicalId ?? null });
     }),
 
     entry('wxmp_pause_info', 'Return the latest Debugger.paused payload.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => result(app.sessions.get(text(args, 'session_id')).channel.lastPaused)),

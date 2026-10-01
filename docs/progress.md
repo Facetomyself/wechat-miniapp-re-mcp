@@ -1,8 +1,19 @@
 # Progress and Acceptance Status
 
-Last updated: 2026-07-29
+Last updated: 2026-08-23 (paused)
 
 Current working state:
+
+- Child branch: `refactor/runtime-kernel` (v0.5.2 unattended runtime kernel at `42402d3`, plus live-gate AppService 60s wait on this branch)
+- Package version: `0.5.2`
+- Public PR: https://github.com/Facetomyself/wechat-miniapp-re-mcp/pull/18 (OPEN vs `main`)
+- Parent gitlink: `reverse_ENV` will refresh after this branch push; previous pin was `1cb426b` → `42402d3`
+- Last recorded local check: 158 tests at `42402d3`; live-gate wait change re-ran `npm test` (158 pass)
+- Pause: 2026-08-23 operator stopped further live-gate attempts. Do not claim a v20079 full-semantic pass.
+- Live-gate AppService wait is 60s with `wxmp_wait_for_runtime` retry on empty/`RUNTIME_NOT_CONNECTED`. Analysis: [`reviews/2026-08-23-wmpf20079-unattended-runtime/report.md`](reviews/2026-08-23-wmpf20079-unattended-runtime/report.md)
+- Strongest v20079 live evidence: `workspace/live-verification-m7/wechat-miniapp/live-semantic-gate-v0.5.2-wmpf20079-1787474159248.json` (SHA-256 `1aa5d57aed2e380530d474c14439a70286dbab16d6668f97dbbcd27181610516`) — Frida + 9421 + CDP Debugger/Network passed; AppService probe returned zero WMPF contexts.
+
+Historical working state at v0.4.0:
 
 - Child branch: `fix/project-review-p0` (uncommitted v0.4.0 implementation; local static/unit/contract gates complete, real WMPF workflow runtime-pending)
 - Package version: `0.4.0`
@@ -12,6 +23,45 @@ Current working state:
 - Future product work and acceptance priorities are tracked in [`roadmap.md`](roadmap.md); this file records achieved capability gates only.
 
 The project is not marked complete by a percentage. Transport connectivity, tool invocation, semantic capability success, and repeatability are tracked as separate gates.
+
+## v0.5.2 unattended runtime kernel
+
+Delivered on `refactor/runtime-kernel` (M0–M7, committed as `42402d3`):
+
+- Session wait default is 60s. Parked `waiting_for_runtime` / `disconnected` sessions resume with the same `session_id` and do not re-inject Frida.
+- Missing injectable Profiles: `wxmp_open` copies `flue.dll`, runs `wmpf-offset-adaptation`, smoke-attests Frida RPC, and promotes `extractor+runtime-smoke`. Historical RVAs are not a fallback.
+- Agent surface stays 18 tools (`wxmp_evaluate` / `wxmp_list_scripts` / `wxmp_correlate` included). Expert is 70 tools.
+- Expert debugger primitives: paused state, scoped variables, call-frame evaluate, XHR/exception breakpoints, initiator, WebSocket frames, WASM save. Reconnect marks logical breakpoints `stale`.
+- Restored-source index schema v2 plus correlate of AppID/URL/initiator/script/route. Gwxapkg remains a subprocess adapter.
+- Live runner calls `wxmp_doctor` then `wxmp_open`, auto-selects the current main WMPF when `--wmpf-version` is omitted, and uses a 60s MCP/tool timeout.
+
+### 2026-08-23 WMPF 20079 live campaign (paused)
+
+Target: WeChatAppEx main PID `23104`, WMPF `20079`, `flue.dll` SHA-256 `b28ec2d547e8771aeebe94ba77bc618941c0ce0794ef443f905666f0668f5d2b`, bundled profile `data/profiles/clean-room/windows-20079.json`. Project: `workspace/live-verification-m7`.
+
+| Summary | Session | First failure | Evidence |
+|---|---|---|---|
+| `...-1787463569747.json` | (none) | `wxmp_open` MCP `-32001` 60s timeout | runner timeout vs 60s attach wait |
+| `...-1787463719355.json` | `wxmp-9aa4b27d-...` | `runtimeBridge` | Frida ready; `loadStartEntered=0`; no 9421 |
+| `...-1787473658071.json` | `wxmp-76211fe6-...` | `runtimeBridge` | same: inject without post-hook reload |
+| `...-1787473826436.json` | `wxmp-c325a5f8-...` | `runtimeBridge` | same |
+| `...-1787474159248.json` | `wxmp-1a4846a1-...` | `appserviceContext` | 9421 connected; CDP/Network live; `session.contexts=[]` |
+| `...-wmpfauto-1787474668258.json` | `wxmp-db6c0696-...` | `runtimeBridge` | Frida ready; `loadStartEntered=0` for the full 120s wait |
+
+Proven on 20079 (session `wxmp-1a4846a1-e376-43fc-a6f4-abbb2ff187f5`):
+
+- health 0.5.2 / 70 expert tools;
+- profile schema, module hash, unique AOB (or extractor structure);
+- Frida `cdp_filter_attached` + `load_start_attached` + `ready`;
+- `runtime.connected=3`, `Debugger.scriptParsed=174`, `Network.requestWillBeSent=46`, `wmpf.chromeDevtoolsResult=682`.
+
+Not proven (do not claim):
+
+- WMPF `addJsContext` / AppService selection / `wx` evaluate;
+- breakpoint, trace, request-hook, inventory, body, replay, reconnect;
+- `forceDebugTrigger` as a substitute for the operator reload (`attemptedNativeCall=false`).
+
+Operator pause is recorded. Resume procedure is in the review report and `docs/lessons-learned.md`.
 
 ## v0.4.0 agent-first MCP optimization
 
@@ -102,11 +152,11 @@ The project is not marked complete by a percentage. Transport connectivity, tool
 |---|---|---|---|
 | 0. Repository and governance | Complete | Child repository, submodule boundary, MIT license, ignore rules, clean-room/legacy separation | — |
 | 1. Lightweight MCP core | v0.4.0 local gate complete | stdio cold start, 16/59 toolsets, instructions/prompts/resources, schemas/annotations/structured output, codec/bridge/protocol-recorder tests | Official MCP conformance remains optional follow-up |
-| 2. Dynamic reverse workflow | v0.3.1 live accepted; v0.4.0 runtime-pending | v19977 AppService/evaluate/breakpoint/trace/hook/inventory/body/replay/reconnect/export; v0.4.0 workflow/context graph/cursor/snapshot fixture coverage | Repeat the v0.4.0 agent-first sequence on a live target, then repeat full semantics on v20079 |
+| 2. Dynamic reverse workflow | v0.3.1 live accepted; v0.5.2 kernel local-complete; v20079 full-semantic runtime-pending | v19977 full semantic; v20079 Frida + one 9421/CDP/Network connect (`wxmp-1a4846a1`) | AppService/`wx` evaluate and the remaining semantic gates on v20079 |
 | 3. Static reverse workflow | Acceptance complete | prior main/plugin/subpackage/minigame evidence plus reproducible backend subprocess decompile/search/index/repack and failure/no-output gates | — |
 | 4. Profile lifecycle | Complete | canonical v19977/v20079 reviewed profiles, per-module SHA-256 binding, unique cross-version AOB matches, candidate review gate, v20079 production attach/detach | — |
-| 5. Parent integration | Complete | `reverse_ENV` PR #6 advances the gitlink to child `7504046` and records Public/cross-version/workspace governance status | — |
-| 6. Git delivery | Complete | PR #6 carries v0.3.0; PR #7 carries v0.3.1; PR #11 carries WMPF v20079 profile/AOB/hash-binding closure; PR #12 records public delivery; parent integration is merged through `reverse_ENV` PR #6 | — |
+| 5. Parent integration | v0.5.2 gitlink pushed | `reverse_ENV` `1cb426b` points `mcp/wechat-miniapp-re-mcp` at child `42402d3` | Merge child PR #18, then refresh gitlink if later commits land |
+| 6. Git delivery | v0.5.2 PR open | PR #18 carries the unattended runtime kernel | Merge #18 after review; working-tree live-gate 60s AppService wait is not in `42402d3` |
 
 ## Automated verification
 
@@ -130,13 +180,15 @@ Verified on WMPF v19977 by the v0.3.1 live semantic gate:
 - same-session disconnect/requeue/reconnect;
 - evidence bundle export and detach.
 
-The remaining real-target gaps are the v0.4.0 agent-first workflow repeat gate on v19977 and a full second-version mini-program semantic gate. Cross-version AOB uniqueness, profile hash binding, production hook attachment, and detach are closed on WMPF v20079.
+The remaining real-target gaps are the v0.4.0/v0.5.2 agent-first workflow repeat gate on v19977 and a full second-version mini-program semantic gate. Cross-version AOB uniqueness, profile hash binding, production hook attachment, detach, and one post-reload 9421/CDP/Network connect are closed on WMPF v20079. AppService selection is not.
 
 ## Known limitations and next actions
 
-1. Run `doctor -> open -> foreground/reload recovery -> snapshot -> observe -> inventory -> same-transport replay -> close` on the reviewed v19977 target and archive a new acceptance summary.
-2. Repeat the full AppService/CDP/Network/trace/request-hook/replay/reconnect sequence on WMPF v20079 or another reviewed second version.
-3. Keep the mini-program selector available before attach; the WMPF debug filter remains lifecycle-triggered.
+1. Resume only with a coordinated live-gate: keep PC WeChat and one mini-program open; start the runner; wait until Frida `ready`; then close and reopen that mini-program; keep it in the foreground. Reloading before inject misses `LoadStart`.
+2. Keep the working-tree AppService 60s / reconnect wait (or commit it) before the next 20079 attempt. The 20s `call('wxmp_probe_contexts')` path is a known miss after 9421 connect.
+3. If 9421 connects again and `session.contexts` is still empty, inspect captured `wmpf.setupContext` artifacts versus missing `addJsContext` events. Do not copy GPL decoder source; keep unknown envelopes as bounded artifacts until a clean-room decoder is attested.
+4. `forceDebugTrigger` remains observation-only. Do not treat it as a substitute for the operator reload.
+5. A v19977 repeat of the v0.5.2 agent-first sequence is still outstanding; v19977 v0.3.1 remains the last full-semantic reference.
 
 ## Update rule
 

@@ -6,7 +6,7 @@
 4. A real-target failure must be recorded as a capability gap with reproducible evidence.
 5. Push the child repository commit before updating the parent repository gitlink.
 6. Exercise disconnect/reconnect and reject concurrent bridge ownership in contract tests; the WMPF endpoint has no session handshake.
-7. Treat generated profiles as candidates: target-version/hash-bound, validation-visible, and blocked from attach until `wxmp_profile_promote` records explicit review evidence.
+7. Treat generated profiles as candidates: target-version/hash-bound, validation-visible, and blocked from ordinary attach until extractor+runtime-smoke attestation or `wxmp_profile_promote` records explicit review evidence. Never fall back to historical RVAs.
 8. Treat capability flags as verified state: CDP domain enablement, context probes, wrapper counts, breakpoint locations/hits, and replay results must be asserted semantically.
 9. Keep third-party offset/profile data outside Git. Compatibility profiles are loaded only from `WXMP_LEGACY_PROFILE_DIR`.
 10. Tool handlers require JSON Schema validation plus focused behavior tests for success, structured failure, and cleanup.
@@ -27,4 +27,4 @@ git status --short --branch
 CI runs the same gate on Node.js 20 and 22. A PR is not delivery-complete while either matrix job is red or absent.
 The test command uses `scripts/run-tests.mjs` to enumerate compiled test files explicitly; passing the `build/test` directory directly is not portable across Node 20/22 on Windows.
 
-Real-target acceptance is intentionally separate from CI. Run `npm run live-gate -- --wmpf-version <version>` only with the target mini-program open and lifecycle-triggerable. A bridge timeout is a failed `runtimeBridge` gate, not a successful attach; the runner must still detach and export failure evidence.
+Real-target acceptance is intentionally separate from CI. Run `npm run live-gate` against the current WMPF (optional `--wmpf-version`) with the target mini-program already open, and leave it alone until the runner prints `lifecycle: BEFORE`. Then close and reopen that mini-program and keep it in the foreground until `lifecycle: AFTER`. The first `wxmp_open` only waits `--attach-sample-timeout-ms` (default 8s) so the BEFORE sample is not taken after the reload. The close/reopen window is `--runtime-wait-timeout-ms` (default 60s). `runtimeBridge`, `cdpDomains`, `loadStartLifecycle`, and `appserviceContext` are recorded separately. A bridge timeout fails `runtimeBridge` only. `loadStartLifecycle` passes only when `loadStartEntered` increases after BEFORE. Extractor smoke-promote still runs when no injectable Profile exists. The runner must still detach and export failure evidence.

@@ -60,6 +60,15 @@ function defaultRecovery(code: string): RecoveryAdvice {
       nextActions: ['wxmp_doctor', 'wxmp_open'],
     };
   }
+  if (code.startsWith('EXTRACTOR_')) {
+    return {
+      retryable: false,
+      needsUserAction: true,
+      missingCapability: 'runtimeProfile',
+      userAction: 'Install or configure WXMP_OFFSET_EXTRACTOR / WXMP_OFFSET_EXTRACTOR_PYTHON for wmpf-offset-adaptation.',
+      nextActions: ['wxmp_doctor'],
+    };
+  }
   if (code.includes('PROFILE')) {
     return {
       retryable: false,
@@ -67,6 +76,22 @@ function defaultRecovery(code: string): RecoveryAdvice {
       missingCapability: 'runtimeProfile',
       userAction: 'Generate and review a hash-bound Profile for the detected WMPF version, install it in a configured profile directory, then rerun wxmp_doctor.',
       nextActions: ['wxmp_doctor'],
+    };
+  }
+  if (['NOT_PAUSED', 'CALL_FRAME_NOT_FOUND', 'SCOPE_NOT_FOUND', 'SCOPE_OBJECT_UNAVAILABLE'].includes(code)) {
+    return {
+      retryable: true,
+      needsUserAction: false,
+      missingCapability: 'debugger',
+      nextActions: ['wxmp_pause', 'wxmp_get_paused_state'],
+    };
+  }
+  if (code === 'BREAKPOINT_STALE' || code === 'WASM_NOT_FOUND' || code === 'WEBSOCKET_NOT_FOUND' || code === 'WASM_SOURCE_UNAVAILABLE') {
+    return {
+      retryable: false,
+      needsUserAction: false,
+      missingCapability: 'debugger',
+      nextActions: ['wxmp_list_breakpoints', 'wxmp_list_scripts', 'wxmp_list_websockets'],
     };
   }
   if (code.includes('CONTEXT') || code.includes('TRACE_TARGET') || code.includes('REQUEST_HOOK_TARGET')) {

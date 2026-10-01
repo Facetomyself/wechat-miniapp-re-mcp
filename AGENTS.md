@@ -12,7 +12,8 @@
 - MCP tools use the `wxmp_*` prefix.
 - Dynamic operations require an explicit `session_id`; context-specific operations also require `context_id`.
 - Session history is multi-session, but the shared WMPF `127.0.0.1:9421` runtime slot is fail-safe single-owner because the runtime protocol has no PID/session handshake. Reject concurrent attaches instead of guessing socket ownership.
-- Unexpected runtime disconnects must retain the MCP session, requeue the same bridge owner, reset only ephemeral CDP state, and preserve evidence/context listeners for reconnect.
+- Unexpected runtime disconnects must retain the MCP session, requeue the same bridge owner, reset only ephemeral CDP state, and preserve evidence/context listeners for reconnect. Logical breakpoints become `stale`; do not treat previous CDP breakpoint IDs as valid.
+- Unattended-runtime work follows `docs/runtime-contract.md`. Session state transitions go through `src/sessions/machine.ts`. Inject clock/target/Frida/bridge seams via `SessionRuntimeDeps`; do not spawn real WeChat or Frida in unit tests.
 - Frida is imported lazily by the runtime adapter.
 - Static engines are isolated behind adapters; do not embed GPL implementations into the MIT core.
 - Unsupported runtime capabilities must return structured evidence, never synthetic success.
@@ -26,7 +27,8 @@
 - Before commit run: `npm run check`, `git diff --check`, and `git status --short`.
 - New tools require contract tests and README/API updates.
 - Changes to public tool schemas require a version bump.
-- Generated profile candidates must bind to a module SHA-256 and remain non-injectable until their confidence is promoted with review evidence.
+- Generated profile candidates must bind to a module SHA-256 and remain non-injectable until extractor+runtime-smoke attestation or explicit review evidence promotes them. Do not copy historical RVAs or GPL address tables when the extractor is missing or AOB is ambiguous.
+- Offset extraction is a subprocess adapter (`WXMP_OFFSET_EXTRACTOR`, optional `WXMP_OFFSET_EXTRACTOR_PYTHON`). MCP core does not embed IDA or PE analysis.
 - Acceptance claims must be recorded below `data/acceptance/` and pass `npm run acceptance`; do not represent a shallower Profile gate as full semantic verification.
 - Real-target validation uses `scripts/live-semantic-gate.mjs`. Keep summaries and session artifacts in the configured workspace, and preserve structured failure evidence when a lifecycle gate does not trigger.
 

@@ -89,3 +89,40 @@ PC WMPF page contexts can expose the mini-program logic runtime through an acces
 The runtime resolver now checks the current global, `nav.wxFrame`, parent/top candidates, and bounded accessible child frames. Context probing, `wx.*` calls, cloud calls, trace injection, and request hooks all use the same resolver and report `wxRuntimePath` as evidence.
 
 Some WMPF `Debugger.scriptParsed` and Network events arrive with an empty `jscontextId`. These records remain explicitly unscoped, while source retrieval, breakpoints, response bodies, and replay fall back to the selected context instead of treating the empty string as a valid context.
+
+## WMPF 20079 live-gate (2026-08-23)
+
+### 9421 still requires a post-inject lifecycle
+
+Frida `cdp_filter_attached` / `load_start_attached` / `ready` is not enough. Across four 20079 attempts, `loadStartEntered` and `cdpFilterEntered` stayed `0` for the whole 60s+60s wait, and `127.0.0.1:9421` never gained an owner.
+
+The one connect (`wxmp-1a4846a1-e376-43fc-a6f4-abbb2ff187f5`) happened only after the operator closed and reopened the mini-program **after** Frida `ready`. Reloading before inject, or skipping the reload, reproduces `runtimeBridge` failed.
+
+`forceDebugTrigger` is observation-only (`attemptedNativeCall=false`). It does not call the native filter and must not be treated as a 9421 trigger.
+
+### AppService is not implied by CDP execution contexts
+
+On the connected session:
+
+- `runtime.connected=3`, `runtime.disconnected=2`
+- `context.execution_added=4`, `context.execution_removed=4`
+- `Debugger.scriptParsed=174`, `Network.requestWillBeSent=46`
+- `wmpf.setupContext=3`, `wmpf.customMessage=175`, `wmpf.domEvent=41`
+- zero `context.added` / `addJsContext` events
+- `wxmp_probe_contexts` returned `contexts=[]`
+
+`session.contexts` is populated only from decoded `addJsContext` / `removeJsContext`. CDP `Runtime.executionContextCreated` is a different node (`context.execution_added`) and does not fill the AppService selector. `setupContext` is still an unknown category with bounded artifacts; it is **not** a proven replacement for `addJsContext`.
+
+### Live-gate probe window
+
+The committed runner used `call('wxmp_probe_contexts')` with a 20s AppService window. `probeContexts` throws `RUNTIME_NOT_CONNECTED` when the socket drops, which aborted the loop during reconnect churn instead of waiting.
+
+Working-tree follow-up (not in `42402d3`): default `--context-timeout-ms` 60000; on disconnect or empty live contexts, call `wxmp_wait_for_runtime` and retry; only select `active !== false` contexts.
+
+### Resume choreography
+
+1. PC WeChat running, one mini-program already open and in the foreground.
+2. Start `scripts/live-semantic-gate.mjs`.
+3. Wait for Frida `ready` (stdout `[gate] inject: starting wxmp_open` plus hook attach).
+4. Close that mini-program (do not quit WeChat), immediately reopen it, keep it foregrounded.
+5. If 9421 connects, allow the 60s AppService wait to survive reconnect before declaring no AppService.

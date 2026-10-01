@@ -17,6 +17,8 @@ Validation depths are cumulative claims, not completion percentages:
 
 `recordStatus=verified` is accepted only when every gate required by the selected depth is `passed`. Pending deeper gates remain explicit and do not weaken a shallower verified claim.
 
+The live runner also requires `health`, `apiInventory`, `cdpDomains`, and `loadStartLifecycle`. Those four names are not historical acceptance depths. `runtimeBridge` is bridge connectivity plus CDP. `cdpDomains` is Debugger and Network both enabled. `loadStartLifecycle` is `loadStartEntered` increasing after the runner prints its BEFORE sample. `appserviceContext` is a selected wx/AppService context. Passing one of these four does not pass the others.
+
 ## Update workflow
 
 1. Run the tracked live runner or another evidence-producing gate below the configured workspace.

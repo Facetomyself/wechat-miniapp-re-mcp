@@ -142,6 +142,44 @@ test('SessionManager.profileManager is accessible', () => {
   assert.ok(manager.profileManager());
 });
 
+test('SessionManager.hookSnapshot reads loadStartEntered and does not call forceDebugTrigger', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-sess-'));
+  const session = await createSession(root);
+  let triggered = false;
+  session.frida = {
+    detach: async () => undefined,
+    status: async () => ({
+      ready: true,
+      cdpFilterAttached: true,
+      loadStartAttached: true,
+      cdpFilterEntered: 2,
+      loadStartEntered: 0,
+      forceDebugTriggerCalls: 1,
+    }),
+    forceDebugTrigger: async () => {
+      triggered = true;
+      return {};
+    },
+  };
+  const manager = new SessionManager(mockConfig(root));
+  internals(manager).sessions.set(session.id, session);
+  try {
+    const snapshot = await manager.hookSnapshot(session.id);
+    assert.equal(snapshot.available, true);
+    assert.equal(snapshot.loadStartAttached, true);
+    assert.equal(snapshot.loadStartEntered, 0);
+    assert.equal(snapshot.cdpFilterEntered, 2);
+    assert.equal(triggered, false);
+    session.frida = null;
+    const missing = await manager.hookSnapshot(session.id);
+    assert.equal(missing.available, false);
+    assert.equal(missing.loadStartEntered, 0);
+  } finally {
+    await session.evidence.flush();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('SessionManager.publicStatus shape includes required fields', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-sess-'));
   const session = await createSession(root);
@@ -252,6 +290,65 @@ test('SessionManager records a finding when unexpected-detach proxy cleanup fail
     await session.evidence.flush();
     const events = await session.evidence.readEvents(0, 100, 'devtools_proxy.cleanup_failed');
     assert.equal(events.total, 1);
+  } finally {
+    await session.evidence.flush();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('SessionManager.listTargets uses the injected discovery seam', async () => {
+  const targets = [{
+    pid: 111,
+    ppid: 1,
+    executablePath: 'C:\\test\\WeChatAppEx.exe',
+    commandLine: 'test.exe',
+    version: 25459,
+    processType: 'browser',
+    renderType: null,
+    appId: null,
+    isMain: true,
+  }];
+  let calls = 0;
+  const manager = new SessionManager(mockConfig('/tmp'), {
+    discoverTargets: async () => {
+      calls += 1;
+      return targets;
+    },
+  });
+  assert.deepEqual(await manager.listTargets(), targets);
+  assert.equal(calls, 1);
+});
+
+test('SessionManager uses the injected clock for finding timestamps', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-sess-'));
+  const frozen = new Date('2026-08-22T12:00:00.000Z');
+  const manager = new SessionManager(mockConfig(root), { now: () => frozen });
+  const session = await createSession(root);
+  const runtime = internals(manager);
+  runtime.sessions.set(session.id, session);
+  try {
+    runtime.handleFridaDetached(session.id, { reason: 'process-terminated', crash: null });
+    const finding = session.findings.find((entry) => entry.id === 'frida-detached');
+    assert.equal(finding?.firstObservedAt, frozen.toISOString());
+    assert.equal(session.updatedAt, frozen.toISOString());
+    assert.equal(session.state, 'failed');
+  } finally {
+    await session.evidence.flush();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('SessionManager.waitForRuntime rejects terminal session states', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-sess-'));
+  const manager = new SessionManager(mockConfig(root));
+  const session = await createSession(root);
+  session.state = 'closed';
+  internals(manager).sessions.set(session.id, session);
+  try {
+    await assert.rejects(
+      () => manager.waitForRuntime(session.id, 10),
+      (error: unknown) => error instanceof Error && error.message.includes('is in state closed'),
+    );
   } finally {
     await session.evidence.flush();
     await fs.rm(root, { recursive: true, force: true });
