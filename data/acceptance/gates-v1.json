@@ -54,6 +54,8 @@
     "aobUnique",
     "hookAttach",
     "runtimeBridge",
+    "cdpDomains",
+    "loadStartLifecycle",
     "appserviceContext",
     "evaluate",
     "breakpoint",

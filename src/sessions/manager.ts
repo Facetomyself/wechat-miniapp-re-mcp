@@ -22,6 +22,12 @@ export type { AttachOptions, WxmpSession } from './session.js';
 
 const CONTEXT_PROBE_EXPRESSION = buildWxRuntimeProbeExpression();
 
+function hookCount(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.trunc(parsed);
+}
+
 export class SessionManager {
   private readonly sessions = new Map<string, WxmpSession>();
   private readonly proxies = new Map<string, DevToolsProxy>();
@@ -341,6 +347,37 @@ export class SessionManager {
         executionContexts: session.channel.executionContexts?.size ?? 0,
       },
     };
+  }
+
+  async hookSnapshot(sessionId: string): Promise<Record<string, unknown>> {
+    const session = this.get(sessionId);
+    const empty = {
+      available: false,
+      ready: false,
+      cdpFilterAttached: false,
+      loadStartAttached: false,
+      cdpFilterEntered: 0,
+      loadStartEntered: 0,
+      forceDebugTriggerCalls: 0,
+    };
+    if (!session.frida) return empty;
+    try {
+      const raw = await session.frida.status();
+      return {
+        available: true,
+        ready: raw.ready === true,
+        cdpFilterAttached: raw.cdpFilterAttached === true,
+        loadStartAttached: raw.loadStartAttached === true,
+        cdpFilterEntered: hookCount(raw.cdpFilterEntered),
+        loadStartEntered: hookCount(raw.loadStartEntered),
+        forceDebugTriggerCalls: hookCount(raw.forceDebugTriggerCalls),
+      };
+    } catch (error) {
+      return {
+        ...empty,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   contextGraph(sessionId: string): Record<string, unknown> {

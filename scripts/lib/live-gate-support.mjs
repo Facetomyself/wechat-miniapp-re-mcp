@@ -44,6 +44,7 @@ export function parseOptions(args) {
     ['--server', 'serverPath'],
     ['--output', 'outputPath'],
     ['--connect-timeout-ms', 'connectTimeoutMs'],
+    ['--attach-sample-timeout-ms', 'attachSampleTimeoutMs'],
     ['--runtime-wait-timeout-ms', 'runtimeWaitTimeoutMs'],
     ['--context-timeout-ms', 'contextTimeoutMs'],
     ['--reconnect-timeout-ms', 'reconnectTimeoutMs'],
@@ -145,6 +146,53 @@ export function summarizeRequest(request) {
   };
 }
 
+function finiteCount(value) {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.trunc(parsed);
+}
+
+export function lifecycleSample(status) {
+  const source = status && typeof status === 'object' ? status : {};
+  const hook = source.hook && typeof source.hook === 'object' ? source.hook : {};
+  const capabilities = source.capabilities && typeof source.capabilities === 'object' ? source.capabilities : {};
+  const contexts = Array.isArray(source.contexts) ? source.contexts : [];
+  const contextGraph = source.contextGraph && typeof source.contextGraph === 'object' ? source.contextGraph : {};
+  return {
+    available: hook.available === true,
+    ready: hook.ready === true,
+    cdpFilterAttached: hook.cdpFilterAttached === true,
+    loadStartAttached: hook.loadStartAttached === true,
+    cdpFilterEntered: finiteCount(hook.cdpFilterEntered),
+    loadStartEntered: finiteCount(hook.loadStartEntered),
+    forceDebugTriggerCalls: finiteCount(hook.forceDebugTriggerCalls),
+    contextCount: contexts.length,
+    executionContextCount: finiteCount(contextGraph.executionContexts),
+    bridgeConnected: source.bridgeConnected === true,
+    cdp: capabilities.cdp === true,
+    debugger: capabilities.debugger === true,
+    network: capabilities.network === true,
+  };
+}
+
+export function runtimeBridgePassed(sample) {
+  return sample?.bridgeConnected === true && sample?.cdp === true;
+}
+
+export function cdpDomainsPassed(sample) {
+  return sample?.debugger === true && sample?.network === true;
+}
+
+export function loadStartLifecyclePassed(before, after) {
+  return before?.loadStartAttached === true
+    && after?.loadStartAttached === true
+    && finiteCount(after?.loadStartEntered) > finiteCount(before?.loadStartEntered);
+}
+
+export function appserviceContextPassed(appContextId) {
+  return typeof appContextId === 'string' && appContextId.length > 0;
+}
+
 export function summarizeSessionStatus(status) {
   if (!status) return null;
   return {
@@ -200,8 +248,9 @@ Options:
   --project <name>                   Evidence project name (default: live-verification).
   --workspace-root <path>            Workspace root (default: WXMP_WORKSPACE_ROOT or reverse_ENV/workspace).
   --profile-path <path>              Use an explicit reviewed profile.
-  --connect-timeout-ms <number>      Initial wxmp_open / bridge wait (default: 60000).
-  --runtime-wait-timeout-ms <number> Additional parked-session wait (default: 60000).
+  --connect-timeout-ms <number>      Kept for callers. The first attach uses --attach-sample-timeout-ms.
+  --attach-sample-timeout-ms <number> Bridge wait before the lifecycle BEFORE sample (default: 8000).
+  --runtime-wait-timeout-ms <number> Close/reopen window after the BEFORE sample (default: 60000).
   --context-timeout-ms <number>      AppService discovery window (default: 60000).
   --reconnect-timeout-ms <number>    Same-session reconnect wait (default: 60000).
   --skip-reconnect                   Run a reduced gate; cannot establish full-semantic acceptance.

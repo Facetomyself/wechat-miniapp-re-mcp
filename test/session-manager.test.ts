@@ -142,6 +142,44 @@ test('SessionManager.profileManager is accessible', () => {
   assert.ok(manager.profileManager());
 });
 
+test('SessionManager.hookSnapshot reads loadStartEntered and does not call forceDebugTrigger', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-sess-'));
+  const session = await createSession(root);
+  let triggered = false;
+  session.frida = {
+    detach: async () => undefined,
+    status: async () => ({
+      ready: true,
+      cdpFilterAttached: true,
+      loadStartAttached: true,
+      cdpFilterEntered: 2,
+      loadStartEntered: 0,
+      forceDebugTriggerCalls: 1,
+    }),
+    forceDebugTrigger: async () => {
+      triggered = true;
+      return {};
+    },
+  };
+  const manager = new SessionManager(mockConfig(root));
+  internals(manager).sessions.set(session.id, session);
+  try {
+    const snapshot = await manager.hookSnapshot(session.id);
+    assert.equal(snapshot.available, true);
+    assert.equal(snapshot.loadStartAttached, true);
+    assert.equal(snapshot.loadStartEntered, 0);
+    assert.equal(snapshot.cdpFilterEntered, 2);
+    assert.equal(triggered, false);
+    session.frida = null;
+    const missing = await manager.hookSnapshot(session.id);
+    assert.equal(missing.available, false);
+    assert.equal(missing.loadStartEntered, 0);
+  } finally {
+    await session.evidence.flush();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('SessionManager.publicStatus shape includes required fields', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wxmp-sess-'));
   const session = await createSession(root);

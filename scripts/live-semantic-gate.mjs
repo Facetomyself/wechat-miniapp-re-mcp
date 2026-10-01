@@ -5,14 +5,19 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  appserviceContextPassed,
   assertInside,
+  cdpDomainsPassed,
   createSummarySanitizer,
   flattenInventory,
   integerOption,
+  lifecycleSample,
+  loadStartLifecyclePassed,
   normalizeProjectName,
   optionalInteger,
   parseOptions,
   parseResponse,
+  runtimeBridgePassed,
   sleep,
   summarizeRequest,
   summarizeSessionStatus,
@@ -37,6 +42,7 @@ const projectName = normalizeProjectName(options.projectName ?? 'live-verificati
 const expectedWmpfVersion = optionalInteger(options.wmpfVersion, 'wmpf-version', 1);
 const expectedPid = optionalInteger(options.pid, 'pid', 1);
 const connectTimeoutMs = integerOption(options.connectTimeoutMs, 'connect-timeout-ms', 60_000, 1, 120_000);
+const attachSampleTimeoutMs = integerOption(options.attachSampleTimeoutMs, 'attach-sample-timeout-ms', 8_000, 1, 120_000);
 const runtimeWaitTimeoutMs = integerOption(options.runtimeWaitTimeoutMs, 'runtime-wait-timeout-ms', 60_000, 1, 120_000);
 const contextTimeoutMs = integerOption(options.contextTimeoutMs, 'context-timeout-ms', 60_000, 1, 120_000);
 const reconnectTimeoutMs = integerOption(options.reconnectTimeoutMs, 'reconnect-timeout-ms', 60_000, 1, 180_000);
@@ -71,6 +77,7 @@ if (options.dryRun) {
     profilePath: profilePath ?? null,
     outputPath,
     connectTimeoutMs,
+    attachSampleTimeoutMs,
     runtimeWaitTimeoutMs,
     contextTimeoutMs,
     reconnectTimeoutMs,
@@ -117,6 +124,18 @@ async function call(name, args = {}, timeoutMs = 90_000) {
     name,
   );
   return parseResponse(name, response);
+}
+
+async function readLifecycleSample(reason) {
+  const statusResult = sessionId
+    ? await attempt('wxmp_session_status', { session_id: sessionId }, 10_000)
+    : { ok: false, details: { message: 'session not started' } };
+  return {
+    ...lifecycleSample(statusResult.ok ? statusResult.data : null),
+    reason,
+    observedAt: new Date().toISOString(),
+    statusOk: statusResult.ok === true,
+  };
 }
 
 async function attempt(name, args = {}, timeoutMs = 90_000) {
@@ -382,21 +401,17 @@ try {
     extractorStructured,
   } : generatedProfile.details);
 
-  process.stdout.write('[gate] inject: starting wxmp_open; after Frida attach, close then reopen the mini-program immediately and keep it in the foreground\n');
+  process.stdout.write('[gate] inject: attaching Frida. Leave the mini-program alone until the lifecycle BEFORE line.\n');
   const opened = await call('wxmp_open', {
     pid: main.pid,
     project_name: projectName,
-    connect_timeout_ms: connectTimeoutMs,
+    connect_timeout_ms: attachSampleTimeoutMs,
     correlate_packages: false,
     ...(profilePath ? { profile_path: profilePath } : {}),
-  }, connectTimeoutMs + 45_000);
+  }, attachSampleTimeoutMs + 45_000);
   sessionId = opened.sessionId;
   summary.runtime.sessionId = sessionId;
   let attached = opened.status ?? opened;
-  if (!attached.bridgeConnected) {
-    const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: runtimeWaitTimeoutMs }, runtimeWaitTimeoutMs + 10_000);
-    if (waited.ok) attached = waited.data;
-  }
   if (attached.profile?.path && probedProfile?.hashMatches !== true) {
     const promotedProbe = await attempt('wxmp_profile_probe', {
       pid: main.pid,
@@ -433,14 +448,82 @@ try {
     frida: attached.capabilities?.frida,
     profileVersion: attached.profile?.version,
   });
-  record('runtimeBridge', attached.bridgeConnected === true && attached.capabilities?.cdp === true, {
-    state: attached.state,
-    bridgeConnected: attached.bridgeConnected,
-    cdp: attached.capabilities?.cdp,
-    debugger: attached.capabilities?.debugger,
-    network: attached.capabilities?.network,
+
+  const lifecycleBefore = await readLifecycleSample('before-reload');
+  summary.runtime.lifecycle = { before: lifecycleBefore };
+  process.stdout.write(`[gate] lifecycle: BEFORE ${JSON.stringify({
+    loadStartEntered: lifecycleBefore.loadStartEntered,
+    loadStartAttached: lifecycleBefore.loadStartAttached,
+    contextCount: lifecycleBefore.contextCount,
+    bridgeConnected: lifecycleBefore.bridgeConnected,
+  })}\n`);
+  process.stdout.write('[gate] lifecycle: close the mini-program, reopen it, and keep it in the foreground. Wait for the AFTER line.\n');
+
+  const lifecycleDeadline = Date.now() + runtimeWaitTimeoutMs;
+  let lifecycleAfter = lifecycleBefore;
+  while (Date.now() < lifecycleDeadline) {
+    if (!lifecycleAfter.bridgeConnected) {
+      const waitMs = Math.min(runtimeWaitTimeoutMs, remainingMs(lifecycleDeadline));
+      if (waitMs >= 1) {
+        const waited = await attempt('wxmp_wait_for_runtime', { session_id: sessionId, timeout_ms: waitMs }, waitMs + 10_000);
+        if (waited.ok) attached = waited.data;
+      }
+    }
+    lifecycleAfter = await readLifecycleSample('after-reload');
+    const loadStartDelta = lifecycleAfter.loadStartEntered - lifecycleBefore.loadStartEntered;
+    summary.runtime.lifecycle.after = lifecycleAfter;
+    summary.runtime.lifecycle.loadStartDelta = loadStartDelta;
+    process.stdout.write(`[gate] lifecycle: POLL ${JSON.stringify({
+      loadStartEntered: lifecycleAfter.loadStartEntered,
+      loadStartDelta,
+      contextCount: lifecycleAfter.contextCount,
+      bridgeConnected: lifecycleAfter.bridgeConnected,
+      remainingMs: remainingMs(lifecycleDeadline),
+    })}\n`);
+    if (loadStartDelta > 0 && lifecycleAfter.bridgeConnected) break;
+    if (Date.now() >= lifecycleDeadline) break;
+    await sleep(Math.min(1500, remainingMs(lifecycleDeadline)));
+  }
+  const loadStartDelta = lifecycleAfter.loadStartEntered - lifecycleBefore.loadStartEntered;
+  summary.runtime.lifecycle.after = lifecycleAfter;
+  summary.runtime.lifecycle.loadStartDelta = loadStartDelta;
+  attached = {
+    ...attached,
+    bridgeConnected: lifecycleAfter.bridgeConnected,
+    capabilities: {
+      ...(attached.capabilities ?? {}),
+      cdp: lifecycleAfter.cdp,
+      debugger: lifecycleAfter.debugger,
+      network: lifecycleAfter.network,
+    },
+  };
+  process.stdout.write(`[gate] lifecycle: AFTER ${JSON.stringify({
+    loadStartEntered: lifecycleAfter.loadStartEntered,
+    loadStartDelta,
+    contextCount: lifecycleAfter.contextCount,
+    executionContextCount: lifecycleAfter.executionContextCount,
+    bridgeConnected: lifecycleAfter.bridgeConnected,
+    debugger: lifecycleAfter.debugger,
+    network: lifecycleAfter.network,
+  })}\n`);
+  record('runtimeBridge', runtimeBridgePassed(lifecycleAfter), {
+    bridgeConnected: lifecycleAfter.bridgeConnected,
+    cdp: lifecycleAfter.cdp,
+    debugger: lifecycleAfter.debugger,
+    network: lifecycleAfter.network,
   });
-  if (!attached.bridgeConnected) throw new Error(`WMPF runtime did not connect to the ${serverVersion} bridge`);
+  record('cdpDomains', cdpDomainsPassed(lifecycleAfter), {
+    debugger: lifecycleAfter.debugger,
+    network: lifecycleAfter.network,
+  });
+  record('loadStartLifecycle', loadStartLifecyclePassed(lifecycleBefore, lifecycleAfter), {
+    before: lifecycleBefore.loadStartEntered,
+    after: lifecycleAfter.loadStartEntered,
+    delta: loadStartDelta,
+    loadStartAttached: lifecycleAfter.loadStartAttached,
+    forceDebugTriggerCalls: lifecycleAfter.forceDebugTriggerCalls,
+  });
+  if (!runtimeBridgePassed(lifecycleAfter)) throw new Error(`WMPF runtime did not connect to the ${serverVersion} bridge`);
 
   let probed = null;
   let runtimeProbes = [];
@@ -551,11 +634,14 @@ try {
   summary.runtime.contextAttempts = contextAttempts;
   appContextId = appCandidate?.context.id ?? '';
   fetchContextId = fetchCandidate?.context.id ?? '';
-  record('appserviceContext', Boolean(appContextId), {
+  record('appserviceContext', appserviceContextPassed(appContextId), {
     selectedContextId: probed?.selectedContextId ?? '',
     appContextId,
     fetchContextId,
     attemptCount: contextAttempts.length,
+    contextCountBefore: summary.runtime.lifecycle?.before?.contextCount ?? null,
+    contextCountAfter: summary.runtime.lifecycle?.after?.contextCount ?? null,
+    loadStartDelta: summary.runtime.lifecycle?.loadStartDelta ?? null,
     contexts: runtimeProbes.map((entry) => ({
       id: entry.context.id,
       role: entry.context.role,
@@ -566,7 +652,7 @@ try {
       wxRuntimePath: entry.runtime?.wxRuntimePath,
     })),
   });
-  if (!appContextId) throw new Error(`No wx/AppService context was found after ${contextAttempts.length} probe attempts`);
+  if (!appserviceContextPassed(appContextId)) throw new Error(`No wx/AppService context was found after ${contextAttempts.length} probe attempts`);
   await call('wxmp_select_context', { session_id: sessionId, context_id: appContextId });
 
   const evaluation = await call('wxmp_evaluate', {

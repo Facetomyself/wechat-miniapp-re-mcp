@@ -40,7 +40,14 @@ export function buildSessionTools(app: WxmpApp): ToolEntry[] {
       return result({ sessionId: text(args, 'session_id'), state: 'closed' });
     }),
 
-    entry('wxmp_session_status', 'Read one session state, capabilities, contexts, and evidence path.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => result(app.sessions.publicStatus(app.sessions.get(text(args, 'session_id'))))),
+    entry('wxmp_session_status', 'Read one session state, capabilities, contexts, hook counters, and evidence path.', objectSchema({ session_id: stringProp('Session identifier.') }, ['session_id']), async (args) => {
+      const sessionId = text(args, 'session_id');
+      const session = app.sessions.get(sessionId);
+      return result({
+        ...app.sessions.publicStatus(session),
+        hook: await app.sessions.hookSnapshot(sessionId),
+      });
+    }),
 
     entry('wxmp_wait_for_runtime', 'Wait for an attached or disconnected WMPF session to connect again without reinjecting Frida.', objectSchema({ session_id: stringProp('Session identifier.'), timeout_ms: numberProp('Wait timeout in milliseconds.') }, ['session_id']), async (args) => result(await app.sessions.waitForRuntime(text(args, 'session_id'), int(args, 'timeout_ms', DEFAULT_RUNTIME_WAIT_MS, 1, 120_000)))),
 
